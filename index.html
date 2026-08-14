@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CH Fernzug Monitor</title>
+<title>Hermonitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500&family=Azeret+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -29,6 +29,7 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; min-height: 100vh; display: flex; flex-direction: column; }
+  body.auth-locked { overflow: hidden; height: 100vh; }
 
   header {
     background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -46,10 +47,6 @@
   .kpi-val.amber { color: var(--amber); }
 
   .connection-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text2); padding: 4px 10px; border: 1px solid var(--border); border-radius: 3px; }
-  .filter-toggle-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; padding: 6px 12px; border-radius: 3px; cursor: pointer; text-transform: uppercase; transition: all 0.15s; }
-  .filter-toggle-btn:hover { color: var(--amber); border-color: var(--amber-dim); }
-  .filter-toggle-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--bg); }
-  .main.filters-hidden .sidebar { display: none; }
   .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text2); flex-shrink: 0; }
   .conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
   .conn-dot.error { background: var(--red); }
@@ -57,27 +54,35 @@
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 
   .main { display: flex; flex: 1; overflow: hidden; }
-  .sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+  .sidebar { width: 232px; min-width: 232px; background: linear-gradient(180deg, var(--bg2), oklch(16% 0.008 240)); border-right: 1px solid var(--border); padding: 16px 14px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; transition: width 0.2s ease, min-width 0.2s ease, padding 0.2s ease; }
+  .sidebar-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .sidebar-title { font-family: var(--font-display); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text); white-space: nowrap; }
+  .sidebar-body { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .filter-toggle-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-size: 14px; width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .filter-toggle-btn:hover { color: var(--amber); border-color: var(--amber-dim); background: var(--bg3); }
+  .sidebar.collapsed { width: 44px; min-width: 44px; padding: 16px 8px; }
+  .sidebar.collapsed .sidebar-body, .sidebar.collapsed .sidebar-title { display: none; }
+  .sidebar.collapsed .sidebar-header { justify-content: center; }
   .content { flex: 1; overflow: auto; padding: 16px; }
 
-  .filter-group { display: flex; flex-direction: column; gap: 6px; }
+  .filter-group { display: flex; flex-direction: column; gap: 7px; background: oklch(20% 0.01 240 / 0.5); border: 1px solid oklch(26% 0.012 240); border-radius: 8px; padding: 10px 12px; }
   .filter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--amber-dim); font-family: var(--font-display); font-weight: 600; }
-  .filter-select, .filter-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 6px 8px; border-radius: 3px; width: 100%; outline: none; }
+  .filter-select, .filter-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 7px 9px; border-radius: 6px; width: 100%; outline: none; transition: border-color 0.15s; }
   .filter-select:focus, .filter-input:focus { border-color: var(--amber-dim); }
   .filter-input::placeholder { color: var(--text2); }
 
-  .horizon-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-  .hz-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-mono); font-size: 12px; padding: 5px 2px; text-align: center; cursor: pointer; border-radius: 3px; transition: all 0.15s; }
+  .horizon-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .hz-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-mono); font-size: 12px; padding: 6px 2px; text-align: center; cursor: pointer; border-radius: 6px; transition: all 0.15s; }
   .hz-btn:hover { border-color: var(--amber-dim); color: var(--text); }
   .hz-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--bg); font-weight: 600; }
 
-  .reload-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--amber); font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 0.05em; padding: 8px; text-align: center; cursor: pointer; border-radius: 3px; text-transform: uppercase; transition: all 0.15s; width: 100%; }
-  .reload-btn:hover { background: var(--amber-dim); color: var(--bg); }
+  .reload-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--amber); font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 0.05em; padding: 9px; text-align: center; cursor: pointer; border-radius: 6px; text-transform: uppercase; transition: all 0.15s; width: 100%; }
+  .reload-btn:hover { background: var(--amber-dim); color: var(--bg); box-shadow: 0 0 0 1px var(--amber); }
 
   .last-update { font-size: 10px; color: var(--text2); font-family: var(--font-mono); text-align: center; line-height: 1.4; }
 
-  .type-filter-grid { display: flex; flex-wrap: wrap; gap: 4px; }
-  .type-pill { font-family: var(--font-mono); font-size: 11px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 2px; cursor: pointer; background: var(--bg3); color: var(--text2); transition: all 0.15s; }
+  .type-filter-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+  .type-pill { font-family: var(--font-mono); font-size: 11px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; background: var(--bg3); color: var(--text2); transition: all 0.15s; }
   .type-pill:hover { border-color: var(--amber-dim); color: var(--text); }
   .type-pill.active { color: var(--bg); font-weight: 600; }
   .type-pill.active[data-type="all"] { background: var(--amber-dim); border-color: var(--amber); color: var(--text); }
@@ -93,15 +98,15 @@
   .result-count { font-size: 11px; color: var(--text2); font-family: var(--font-mono); margin-bottom: 8px; }
   .table-wrap { min-width: 920px; }
 
-  table { width: 100%; border-collapse: collapse; }
-  thead th { font-family: var(--font-display); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  thead th { font-family: var(--font-display); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; overflow: hidden; text-overflow: ellipsis; }
   thead th:hover { color: var(--amber); }
   thead th.sorted { color: var(--amber); }
 
   tbody tr { border-bottom: 1px solid oklch(20% 0.008 240); transition: background 0.1s; cursor: pointer; }
   tbody tr:hover { background: var(--bg3); }
   tbody tr.selected { background: oklch(20% 0.015 240); }
-  td { padding: 8px 10px; font-size: 13px; white-space: nowrap; vertical-align: middle; }
+  td { padding: 8px 10px; font-size: 13px; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
 
   tr.now-marker { cursor: default; border-bottom: none; }
   tr.now-marker:hover { background: transparent; }
@@ -116,6 +121,7 @@
   .zuglauf-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
   .zuglauf-table th { font-family: var(--font-display); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   .zuglauf-table td { font-size: 12px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); }
+  .td-source { color: var(--text2); font-size: 10px; font-family: var(--font-mono); }
   .td-time { font-family: var(--font-mono); font-size: 13px; }
   .td-delay { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
   .delay-0 { color: var(--green); }
@@ -132,7 +138,9 @@
   .badge-RE7 { background: oklch(22% 0.06 190); color: var(--teal); border: 1px solid oklch(32% 0.10 190); }
   .badge-TER { background: oklch(22% 0.06 340); color: var(--pink); border: 1px solid oklch(32% 0.10 340); }
 
-  .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-family: var(--font-mono); padding: 2px 8px; border-radius: 2px; white-space: nowrap; }
+  .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-family: var(--font-mono); padding: 2px 8px; border-radius: 2px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .td-status { white-space: normal; vertical-align: top; padding-top: 8px; }
+  .status-detail { font-family: var(--font-mono); font-size: 10px; color: var(--text2); margin-top: 3px; line-height: 1.3; overflow-wrap: break-word; }
   .status-badge::before { content:''; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
   .s-ontime   { background: oklch(18% 0.06 145); color: var(--green); border: 1px solid oklch(28% 0.10 145); }
   .s-ontime::before { background: var(--green); }
@@ -164,20 +172,68 @@
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .auth-gate {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(ellipse 900px 500px at 20% 15%, oklch(30% 0.04 75 / 0.12), transparent),
+      radial-gradient(ellipse 900px 500px at 85% 85%, oklch(35% 0.05 240 / 0.15), transparent),
+      var(--bg);
+    padding: 20px;
+  }
+  .auth-gate.hidden { display: none; }
+  .auth-card {
+    width: 100%; max-width: 340px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+    padding: 36px 32px; display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 20px 60px oklch(0% 0 0 / 0.4);
+  }
+  .auth-logo {
+    font-family: var(--font-display); font-size: 28px; font-weight: 700; letter-spacing: 0.02em;
+    color: var(--amber); text-align: center; text-transform: uppercase;
+  }
+  .auth-sub { font-size: 12px; color: var(--text2); text-align: center; margin: 4px 0 24px; line-height: 1.4; }
+  .auth-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--amber-dim); font-family: var(--font-display); font-weight: 600; margin-bottom: 6px; }
+  .auth-input {
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--font-body); font-size: 14px; padding: 11px 13px; border-radius: 8px;
+    outline: none; transition: border-color 0.15s, box-shadow 0.15s; margin-bottom: 18px;
+  }
+  .auth-input:focus { border-color: var(--amber-dim); box-shadow: 0 0 0 3px oklch(78% 0.18 75 / 0.15); }
+  .auth-input.shake { animation: authShake 0.35s; border-color: var(--red); }
+  @keyframes authShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  .auth-submit {
+    background: var(--amber-dim); border: 1px solid var(--amber); color: var(--bg);
+    font-family: var(--font-display); font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 11px; border-radius: 8px; cursor: pointer; transition: all 0.15s;
+  }
+  .auth-submit:hover { background: var(--amber); }
+  .auth-error { font-size: 12px; color: var(--red); text-align: center; min-height: 16px; margin-top: 14px; }
 </style>
 </head>
 <body>
 
+<div class="auth-gate" id="auth-gate">
+  <form class="auth-card" id="auth-form">
+    <div class="auth-logo">Hermonitor</div>
+    <div class="auth-sub">Live-Übersicht internationaler Züge in die/aus der Schweiz</div>
+    <label class="auth-label" for="auth-password">Passwort</label>
+    <input class="auth-input" id="auth-password" type="password" autocomplete="current-password" autofocus>
+    <button class="auth-submit" type="submit">Anmelden</button>
+    <div class="auth-error" id="auth-error"></div>
+  </form>
+</div>
+
 <header>
-  <div class="logo">CH Fernzug <span>Monitor</span></div>
-  <button class="filter-toggle-btn" id="filter-toggle-btn" title="Filter ein-/ausblenden">☰ Filter</button>
+  <div class="logo">Hermonitor</div>
   <div class="header-kpis">
     <div class="kpi"><div class="kpi-val amber" id="kpi-total">–</div><div class="kpi-label">Züge</div></div>
     <div class="kpi"><div class="kpi-val green" id="kpi-ontime">–</div><div class="kpi-label">Pünktlich</div></div>
     <div class="kpi"><div class="kpi-val yellow" id="kpi-delayed">–</div><div class="kpi-label">Verspätet</div></div>
     <div class="kpi"><div class="kpi-val red" id="kpi-cancelled">–</div><div class="kpi-label">Ausfall</div></div>
     <div class="kpi"><div class="kpi-val" id="kpi-unknown" style="color:var(--text2)">–</div><div class="kpi-label">Unbekannt</div></div>
-    <div class="kpi"><div class="kpi-val amber" id="kpi-avgdelay">–</div><div class="kpi-label">Ø Verspätung</div></div>
+    <div class="kpi"><div class="kpi-val amber" id="kpi-avgdelay">–</div><div class="kpi-label">Σ Verspätung</div></div>
   </div>
   <div class="connection-badge">
     <div class="conn-dot" id="conn-dot"></div>
@@ -187,6 +243,11 @@
 
 <div class="main">
   <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Filter</span>
+      <button class="filter-toggle-btn" id="filter-toggle-btn" title="Filter ausblenden">‹</button>
+    </div>
+    <div class="sidebar-body" id="sidebar-body">
     <div class="filter-group">
       <div class="filter-label">Zeithorizont</div>
       <div class="horizon-buttons" id="horizon-btns">
@@ -239,8 +300,8 @@
       <select class="filter-select" id="region-filter">
         <option value="all">Alle Regionen</option>
         <option value="nord">Nord (Basel SBB / Bad Bf)</option>
-        <option value="ost">Ost (Schaffhausen / St.Margrethen / Buchs SG / Chiasso)</option>
-        <option value="west">West (Domodossola / Genève / Vallorbe)</option>
+        <option value="ost">Ost / Süd (Schaffhausen / St.Margrethen / Buchs SG / Chiasso)</option>
+        <option value="west">West / Mitte (Domodossola / Genève / Vallorbe)</option>
       </select>
     </div>
     <div class="filter-group">
@@ -260,12 +321,22 @@
     </div>
     <button class="reload-btn" id="reload-btn">↻ Neu laden</button>
     <div class="last-update" id="last-update">–</div>
+    </div>
   </aside>
 
   <main class="content">
     <div class="result-count" id="result-count"></div>
     <div class="table-wrap">
       <table id="train-table">
+        <colgroup>
+          <col style="width:12%">
+          <col style="width:16%">
+          <col style="width:16%">
+          <col style="width:11%">
+          <col style="width:12%">
+          <col style="width:20%">
+          <col style="width:13%">
+        </colgroup>
         <thead>
           <tr>
             <th data-col="id">Zug</th>
@@ -313,12 +384,16 @@ const BASE_TRAINS = [
   // Confirmed by user: this working actually starts at Karlsruhe Hbf, not
   // Hamburg Hbf (line label reused from the ICE's usual long-haul routing;
   // the live board is authoritative and will keep this in sync going forward).
-  {id:'ICE 271', from:'Karlsruhe Hbf', to:'Interlaken Ost', dep:'05:07', arr:'09:59', chTime:'07:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 271', from:'Karlsruhe Hbf', to:'Interlaken Ost', dep:'05:56', arr:'09:59', chTime:'07:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 275', from:'Frankfurt Hbf', to:'Chur',           dep:'06:50', arr:'12:22', chTime:'09:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 101', from:'Hamburg Hbf',   to:'Brig',           dep:'07:07', arr:'13:13', chTime:'10:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 277', from:'Frankfurt Hbf', to:'Chur',           dep:'08:50', arr:'14:22', chTime:'11:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
-  {id:'ICE 279', from:'Hamburg Hbf',   to:'Interlaken Ost', dep:'09:07', arr:'15:59', chTime:'13:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
-  {id:'ICE 105', from:'Frankfurt Hbf', to:'Chur',           dep:'10:50', arr:'17:22', chTime:'14:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  // Confirmed by user via its own live Zuglauf: this working actually
+  // starts at Berlin Hbf, not Hamburg Hbf.
+  {id:'ICE 279', from:'Berlin Hbf',    to:'Interlaken Ost', dep:'06:31', arr:'15:59', chTime:'13:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  // Confirmed by user via its own live Zuglauf: this working actually
+  // starts at Hamburg Hbf, not Frankfurt Hbf.
+  {id:'ICE 105', from:'Hamburg Hbf',  to:'Chur',           dep:'06:45', arr:'17:22', chTime:'14:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 107', from:'Hamburg Hbf',   to:'Brig',           dep:'13:07', arr:'19:13', chTime:'16:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 373', from:'Frankfurt Hbf', to:'Chur',           dep:'14:50', arr:'20:22', chTime:'17:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
   {id:'ICE 375', from:'Hamburg Hbf',   to:'Interlaken Ost', dep:'15:07', arr:'22:00', chTime:'19:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
@@ -390,7 +465,7 @@ const BASE_TRAINS = [
   // Confirmed by user: this working actually starts at Lindau-Reutin, not
   // München Hbf (the EC only runs Lindau-Reutin–Zürich; the München–Lindau
   // leg is a separate connecting service). Live board is authoritative.
-  {id:'EC 290', from:'Lindau-Reutin', to:'Zürich HB',   dep:'06:10', arr:'08:28', chTime:'07:08', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 290', from:'Lindau-Reutin', to:'Zürich HB',   dep:'06:52', arr:'08:28', chTime:'07:08', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 198', from:'München Hbf', to:'Zürich HB',   dep:'07:10', arr:'09:23', chTime:'08:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 196', from:'München Hbf', to:'Zürich HB',   dep:'09:10', arr:'11:28', chTime:'10:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 194', from:'München Hbf', to:'Zürich HB',   dep:'11:10', arr:'13:28', chTime:'12:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
@@ -517,7 +592,7 @@ const BASE_TRAINS = [
 // looked identical to a confirmed on-time train — indistinguishable from
 // "delays aren't working". delayKnown lets the UI show "–/Unbekannt" until
 // opendata.ch actually confirms a value.
-const TRAINS = BASE_TRAINS.map((t, i) => ({...t, delay:0, status:'on-time', delayKnown:false, liveSeen:false, _id:i, _schedMin: toMin(t.chTime)}));
+const TRAINS = BASE_TRAINS.map((t, i) => ({...t, from: cleanStationName(t.from), to: cleanStationName(t.to), delay:0, status:'on-time', delayKnown:false, liveSeen:false, _id:i, _schedMin: toMin(t.chTime)}));
 let pollsCompleted = 0; // guards isStaleCurated from hiding everything before opendata.ch has had a first chance to confirm anything
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -647,14 +722,17 @@ function renderKPIs() {
   const ontime = confirmed.filter(t => t.status === 'on-time').length;
   const delayed = confirmed.filter(t => t.status === 'delayed').length;
   const cancelled = confirmed.filter(t => t.status === 'cancelled').length;
+  // Sum of delay across every currently-shown, confirmed-delayed train —
+  // not an average — per explicit request: a single "Ø" figure looked
+  // wrong/misleadingly small next to how much total disruption is showing.
   const withDelay = confirmed.filter(t => t.delay > 0);
-  const avg = withDelay.length ? Math.round(withDelay.reduce((s,t)=>s+t.delay,0)/withDelay.length) : 0;
+  const totalDelay = withDelay.reduce((s,t) => s+t.delay, 0);
   document.getElementById('kpi-total').textContent    = a.length;
   document.getElementById('kpi-ontime').textContent   = ontime;
   document.getElementById('kpi-delayed').textContent  = delayed;
   document.getElementById('kpi-cancelled').textContent= cancelled;
   document.getElementById('kpi-unknown').textContent  = unknown;
-  document.getElementById('kpi-avgdelay').textContent = avg ? '+'+avg+' Min' : '–';
+  document.getElementById('kpi-avgdelay').textContent = totalDelay ? '+'+totalDelay+' Min' : '–';
   document.getElementById('result-count').textContent = `${a.length} Züge im Fenster +${state.filters.timeHorizon}h`;
 }
 
@@ -682,11 +760,14 @@ function renderTable() {
         <span class="type-badge badge-${t.type}">${t.type}</span> <span>${num}</span>
         <div class="zuglauf-toggle" data-zuglauf-id="${t._id}">${zLabel}</div>
       </td>
-      <td>${t.from}</td>
-      <td>${t.to}</td>
-      <td class="td-station">${t.chStation}</td>
+      <td title="${t.from}">${t.from}</td>
+      <td title="${t.to}">${t.to}</td>
+      <td class="td-station" title="${t.chStation}">${t.chStation}</td>
       <td class="td-time">${t.chTime}${effStr}</td>
-      <td><span class="status-badge ${si.cls}">${si.label}</span></td>
+      <td class="td-status" title="${si.detail || si.label}">
+        <span class="status-badge ${si.cls}">${si.label}</span>
+        ${si.detail ? `<div class="status-detail">${si.detail}</div>` : ''}
+      </td>
       <td class="td-delay ${dc}">${t.status === 'cancelled' ? '' : fmtDelay(t.delay, t.delayKnown)}</td>
     </tr>`;
   });
@@ -715,26 +796,39 @@ function renderTable() {
 // nothing to report yet, which reads very differently from "should have
 // live data by now but doesn't".
 function statusInfo(t) {
+  const now = nowMin();
+  const depEff = t.dep ? resolveEff({chTime: t.dep, delay: 0}, now) : null;
+  const notYetDeparted = depEff !== null && depEff > now;
+
   if (t.delayKnown) {
     if (t.status === 'cancelled') {
-      // The confirmed segment is from this run's own recorded origin up to
-      // the border station where the cancellation was detected — that's
-      // exactly what t.from/t.chStation already record.
-      let label = `Ausfall: ${t.from} → ${t.chStation}`;
+      // t.cancelledSegment (resolveCancelledSegment) pinpoints the actual
+      // affected stretch from real per-stop data — e.g. "Basel SBB → Freiburg
+      // Hbf" for a train that only got cut short partway, not its full
+      // scheduled route. Falls back to the full route while that fetch is
+      // still in flight (fires once per tripId in pollOpendata).
+      const seg = t.cancelledSegment;
+      let detail = seg ? `Von ${seg.from} bis ${seg.to}` : `Von ${t.from} bis ${t.to}`;
       if (t.replacementId) {
         const rep = TRAINS.find(r => r._id === t.replacementId);
-        if (rep) label += ` · Ersatzzug ${rep.id}`;
+        if (rep) detail += ` · Ersatzzug ${rep.id}`;
       }
-      return {cls: 's-cancelled', label};
+      return {cls: 's-cancelled', label: 'Ausfall', detail};
+    }
+    // A confirmed "on-time" reading before the train has even left its
+    // origin is not trustworthy — foreign-network prognoses in particular
+    // get revised right up to (and past) departure, so "Pünktlich" here
+    // would overstate certainty. Still show through delayed/cancelled,
+    // since those are real information worth surfacing early.
+    if (t.status === 'on-time' && notYetDeparted) {
+      return {cls: 's-unknown', label: `Abfahrt ${t.dep} Uhr`};
     }
     return {
       cls: t.status==='on-time' ? 's-ontime' : t.delay<=5 ? 's-warning' : 's-delayed',
       label: t.status==='on-time' ? 'Pünktlich' : t.delay<=5 ? 'Leichte Vsp.' : 'Verspätet',
     };
   }
-  const now = nowMin();
-  const depEff = t.dep ? resolveEff({chTime: t.dep, delay: 0}, now) : null;
-  if (depEff !== null && depEff > now) {
+  if (notYetDeparted) {
     return {cls: 's-unknown', label: `Abfahrt ${t.dep} Uhr`};
   }
   return {cls: 's-unknown', label: 'Keine Daten vorhanden'};
@@ -773,21 +867,27 @@ async function renderZuglaufPanel(t) {
     return;
   }
   content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
-  const stops = await fetchZuglaufStops(t.tripId);
+  const stops = await fetchZuglaufStops(t);
   // The user may have selected a different train (or closed the panel)
   // while this was in flight — don't clobber whatever's showing now.
   if (state.selectedId !== t._id) return;
   content.innerHTML = header + (stops ? buildZuglaufTable(stops) : `<div class="zuglauf-msg">Zuglauf konnte nicht geladen werden.</div>`);
 }
 
-// /api/v6/trip returns the static, schedule-only shape of a run — verified
-// its realTime is always false, even for a train whose delay we'd already
-// confirmed live minutes earlier via /stoptimes. So the static shape from
-// /trip is only used for stop names/order; the actual realtime figures are
-// re-fetched per stop from /stoptimes (which does carry them), matched back
-// by tripId. Stops already in the past (no longer on any board) simply
-// don't get a live match and are shown as schedule-only.
-async function fetchZuglaufStops(tripId) {
+// Route (stop names/order) always comes from Transitous's /trip — that's
+// unchanged. What's new is per-stop REALTIME source selection, kept
+// deliberately separate from where the route itself came from (a Swiss
+// stop on a Transitous-sourced route can still get its live figure from
+// the CH source; see the architecture note above enrichFromOpendataFallback).
+// Priority per stop:
+//   Swiss stop:   CH source (opendata.ch) → Transitous → schedule-only
+//   Foreign stop: Transitous → schedule-only  (CH source never applies —
+//                 enforced via canApplyChSource, not a name check)
+// A configurable match window (not an exact-minute compare) is used for CH
+// source matching, same idea as Transitous's own ±15min tolerance elsewhere.
+const CH_MATCH_WINDOW_MINUTES = 10;
+async function fetchZuglaufStops(train) {
+  const tripId = train.tripId;
   try {
     const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -795,10 +895,48 @@ async function fetchZuglaufStops(tripId) {
     const leg = data.legs?.[0];
     if (!leg) return null;
     const staticStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
-    const liveRows = await Promise.all(staticStops.map(s => fetchStopLiveForTrip(s.stopId, tripId)));
-    return staticStops.map((s, i) => {
-      const live = liveRows[i];
+    // The route's own first/last stop names can come back nameless or
+    // truncated from the feed (confirmed: Stuttgart's "Hauptbahnhof (oben)"
+    // platform label with no city at all) — the train's own from/to are
+    // already the best-validated names available (curated data frozen, or
+    // the farthest-endpoint heuristic for dynamic rows), so use those for
+    // the endpoints instead of trusting whatever this specific /trip
+    // response's raw names are.
+    if (staticStops.length) {
+      staticStops[0] = {...staticStops[0], name: train.from};
+      staticStops[staticStops.length - 1] = {...staticStops[staticStops.length - 1], name: train.to};
+    }
+    const number = numKey(train.id);
+    let chHits = 0, transitousHits = 0, chIgnoredForeign = 0;
+
+    const stops = await Promise.all(staticStops.map(async s => {
+      const schedIso = s.scheduledDeparture || s.scheduledArrival;
+      const schedHHMM = hhmmZurich(schedIso);
+
+      if (canApplyChSource(s)) {
+        const chEntry = schedHHMM ? await fetchChLiveForStop(cleanStationName(s.name), train.type, number, schedHHMM, schedIso) : null;
+        if (chEntry) {
+          chHits++;
+          const schedInstant = chEntry.stop.departure || chEntry.stop.arrival;
+          const actualInstant = new Date(new Date(schedInstant).getTime() + chEntry.stop.delay * 60000).toISOString();
+          return {
+            name: s.name,
+            scheduledArrival: s.scheduledArrival, scheduledDeparture: s.scheduledDeparture,
+            arrival: actualInstant, departure: actualInstant,
+            cancelled: false,
+            liveConfirmed: true,
+            source: 'opendata.ch',
+          };
+        }
+        // CH source had nothing here — Transitous is still checked below as
+        // the documented fallback (rule: CH source preferred AND fallback).
+      } else {
+        chIgnoredForeign++;
+      }
+
+      const live = await fetchStopLiveForTrip(s.stopId, tripId, schedIso);
       if (live?.realTime && live.place) {
+        transitousHits++;
         return {
           name: s.name,
           scheduledArrival: live.place.scheduledArrival || s.scheduledArrival,
@@ -806,6 +944,7 @@ async function fetchZuglaufStops(tripId) {
           arrival: live.place.arrival, departure: live.place.departure,
           cancelled: !!live.place.cancelled,
           liveConfirmed: true,
+          source: 'transitous',
         };
       }
       return {
@@ -814,26 +953,155 @@ async function fetchZuglaufStops(tripId) {
         arrival: null, departure: null,
         cancelled: !!s.cancelled,
         liveConfirmed: false,
+        source: 'schedule',
       };
-    });
+    }));
+
+    console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}`);
+    return stops;
   } catch (e) { return null; }
 }
-async function fetchStopLiveForTrip(stopId, tripId) {
+// Matches a Swiss stationboard entry to this specific run: category +
+// number + a tolerant time window (CH_MATCH_WINDOW_MINUTES), preferring the
+// smallest time difference among candidates. No match at all beats a wrong
+// one — returns null rather than guessing.
+// opendata.ch's "next departures from now" board naturally has nothing for
+// a stop that's already passed — but the API accepts a `datetime` anchor,
+// which does return that historical entry, delay included (verified: EC
+// 195 at St. Gallen, an hour in the past, came back correctly with its
+// real +6). Tried without an anchor first (cheaper — one fewer request for
+// the common case of a still-upcoming stop); only anchors into the past
+// when that first attempt found nothing.
+async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso) {
+  const tryFetch = async (datetime) => {
+    try {
+      let url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
+      if (datetime) url += `&datetime=${encodeURIComponent(datetime)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const rows = data.stationboard || [];
+      let best = null, bestDiff = Infinity;
+      for (const entry of rows) {
+        if (CATEGORY_MAP[entry.category] !== type || numKey(entry.number) !== number) continue;
+        const iso = entry.stop?.departure || entry.stop?.arrival;
+        if (!iso || typeof entry.stop?.delay !== 'number') continue;
+        const diff = circDiff(toMin(hhmmZurich(iso)), toMin(schedHHMM));
+        if (diff <= CH_MATCH_WINDOW_MINUTES && diff < bestDiff) { bestDiff = diff; best = entry; }
+      }
+      return best;
+    } catch (e) { return null; }
+  };
+  const forward = await tryFetch(null);
+  if (forward) return forward;
+  if (!schedIso) return null;
+  // An anchor exactly AT the scheduled instant still reports delay:null
+  // (confirmed: Zürich HB, EC 195 — anchored right at 15:32, found the
+  // right row, but its delay hadn't resolved yet from that exact boundary).
+  // A few minutes' buffer past it reliably lands past that resolution point.
+  const anchorDate = new Date(new Date(schedIso).getTime() + 20 * 60000);
+  const pad = n => String(n).padStart(2, '0');
+  const anchor = `${anchorDate.getFullYear()}-${pad(anchorDate.getMonth()+1)}-${pad(anchorDate.getDate())} ${pad(anchorDate.getHours())}:${pad(anchorDate.getMinutes())}`;
+  return await tryFetch(anchor);
+}
+async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
   if (!stopId) return null;
+  const tryFetch = async (arriveBy, time) => {
+    try {
+      const params = new URLSearchParams({stopId, arriveBy: arriveBy ? 'true' : 'false', n: '80', window: String(20 * 3600), mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
+      if (time) params.set('time', time);
+      const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.stopTimes || []).find(s => s.tripId === tripId) || null;
+    } catch (e) { return null; }
+  };
+  const forward = await tryFetch(false);
+  if (forward) return forward;
+  if (!schedIso) return null;
+  // A stop already in the past never shows up in a forward (arriveBy=false)
+  // "upcoming departures" board — arriveBy=true with an explicit deadline
+  // anchored just after the stop's own scheduled time looks *backward* from
+  // there instead, which does surface the historical realtime reading.
+  const anchor = new Date(new Date(schedIso).getTime() + 15 * 60000).toISOString();
+  return await tryFetch(true, anchor);
+}
+
+// The border-crossing entry that flagged this train `cancelled` only knows
+// about that one stop — not which portion of the whole journey is actually
+// affected. Reuse the same per-stop live data the Zuglauf panel already
+// fetches to find where the cancellation genuinely starts and ends: the
+// first cancelled stop, through to the stop right after the *last*
+// cancelled one. Scanning for the last cancelled stop (rather than simply
+// stopping at the first non-cancelled one after the start) matters because
+// a single stop mid-block occasionally isn't itself flagged cancelled even
+// though its neighbours on both sides clearly are (seen: an intermediate
+// stop reading false, sandwiched between two cancelled ones) — stopping
+// there would cut the detected segment far short of the real one.
+function deriveCancelledSegment(stops) {
+  const startIdx = stops.findIndex(s => s.cancelled);
+  if (startIdx === -1) return null;
+  let lastCancelledIdx = startIdx;
+  for (let i = stops.length - 1; i > startIdx; i--) {
+    if (stops[i].cancelled) { lastCancelledIdx = i; break; }
+  }
+  const endIdx = Math.min(lastCancelledIdx + 1, stops.length - 1);
+  return {from: cleanStationName(stops[startIdx].name), to: cleanStationName(stops[endIdx].name)};
+}
+async function resolveCancelledSegment(t) {
+  const stops = await fetchZuglaufStops(t);
+  const live = TRAINS.find(x => x._id === t._id);
+  if (!live || live.tripId !== t.tripId) return; // stale by the time this resolved
+  live.cancelledSegment = stops ? deriveCancelledSegment(stops) : null;
+  applyFilters();
+}
+// /stoptimes' tripFrom/tripTo (used to create a dynamic row) only reflect
+// whichever single GTFS leg is active at the polled station — confirmed:
+// EC 94 recorded "St. Margrethen SG" as its own origin there, when the
+// physical run genuinely starts at München Hbf. /api/v6/trip's joined leg
+// *does* carry the full chain (verified directly against this exact case).
+// Not used for curated rows (frozen by design) or while cancelled (a
+// cancelled trip's /trip shape has come back nameless/wrong before) — both
+// risks that made relying on this unsafe at first. Runs once per tripId in
+// the background, not on every poll.
+async function resolveDynamicRouteEndpoints(t) {
   try {
-    const params = new URLSearchParams({stopId, arriveBy: 'false', n: '80', window: String(20 * 3600), mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
-    const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
-    if (!res.ok) return null;
+    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(t.tripId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    return (data.stopTimes || []).find(s => s.tripId === tripId) || null;
-  } catch (e) { return null; }
+    const leg = data.legs?.[0];
+    if (!leg) return;
+    const trueFrom = cleanStationName(leg.from?.name), trueTo = cleanStationName(leg.to?.name);
+    if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
+    const live = TRAINS.find(x => x._id === t._id);
+    if (!live || live.tripId !== t.tripId || live._id < 100000 || live.status === 'cancelled') return;
+    // "Abfahrt HH:MM Uhr" in the status column means departure from the
+    // *origin* station — dep needs correcting right alongside from/to,
+    // otherwise it keeps showing the old (often border-adjacent) leg's own
+    // departure time under the now-corrected origin's name.
+    const trueDep = hhmmZurich(leg.from?.scheduledDeparture);
+    if (live.from !== trueFrom || live.to !== trueTo || (trueDep && live.dep !== trueDep)) {
+      live.from = trueFrom; live.to = trueTo;
+      if (trueDep) live.dep = trueDep;
+      applyFilters();
+    }
+  } catch (e) { /* leave the stoptimes-derived from/to as-is */ }
 }
 function buildZuglaufTable(stops) {
+  const now = nowMin();
   const rows = stops.map(s => {
+    const name = cleanStationName(s.name);
     const soll = s.scheduledDeparture || s.scheduledArrival;
     const sollStr = hhmmZurich(soll) || '–';
     if (!s.liveConfirmed) {
-      return `<tr><td>${s.name}</td><td class="td-time">${sollStr}</td><td class="td-time">–</td><td class="td-delay">–</td></tr>`;
+      // No live confirmation from either source. If the stop's scheduled
+      // time has already passed, show that as the best-available
+      // "effective" time (it almost certainly ran close to schedule,
+      // more useful than a bare dash) — a still-upcoming stop stays blank
+      // since we genuinely don't know yet.
+      const sollHHMM = hhmmZurich(soll);
+      const isPast = sollHHMM ? resolveEff({chTime: sollHHMM, delay: 0}, now) < now : false;
+      return `<tr><td>${name}</td><td class="td-time">${sollStr}</td><td class="td-time">${isPast ? sollStr : '–'}</td><td class="td-delay">–</td></tr>`;
     }
     const ist = s.departure || s.arrival;
     const istStr = hhmmZurich(ist) || sollStr;
@@ -841,7 +1109,7 @@ function buildZuglaufTable(stops) {
     const dCls = s.cancelled ? 'delay-high' : delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
     const dStr = s.cancelled ? 'Ausfall' : (delayMin === 0 ? '0 Min' : (delayMin > 0 ? '+' : '') + delayMin + ' Min');
     return `<tr>
-      <td>${s.name}</td>
+      <td>${name}</td>
       <td class="td-time">${sollStr}</td>
       <td class="td-time ${dCls}">${istStr}</td>
       <td class="td-delay ${dCls}">${dStr}</td>
@@ -884,8 +1152,16 @@ let dynamicSeq = 100000; // _id space for trains discovered live (not in BASE_TR
 let opendataOK = false;  // kept as the connection-status flag name; now reflects transitous.org reachability
 
 function numKey(id) {
-  const m = String(id).match(/(\d+)/);
-  return m ? String(parseInt(m[1], 10)) : id;
+  // Anchored to the END of the string: "RE7 5337" must yield "5337", not
+  // "7" (the digit inside the category name "RE7" itself, which an
+  // unanchored /(\d+)/ matched first). Every id is "TYPE NUMBER", so the
+  // trailing digit run is always the real train number. This silently
+  // broke all RE7 re-matching across polls — numKey(t.id) never agreed
+  // with the freshly-computed number, so every poll created a brand new
+  // entry instead of updating the existing one (only rescued from visibly
+  // duplicating by the dedup passes hiding the extras after the fact).
+  const m = String(id).match(/(\d+)$/);
+  return m ? String(parseInt(m[0], 10)) : id;
 }
 // SBB reuses the Basel SBB / Basel Bad Bf pair under the same run/number —
 // once as the actual border crossing (Basel Bad Bf, DE↔CH), again a few
@@ -908,6 +1184,34 @@ function placeCountry(place) {
 function hhmmZurich(iso) {
   if (!iso) return null;
   return new Date(iso).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'Europe/Zurich'});
+}
+// "S+U Berlin Hauptbahnhof" -> "Berlin Hbf"; "Stuttgart Hauptbahnhof (oben)"
+// -> "Stuttgart Hbf" (the "(oben/unten/tief)" suffix is just which platform
+// level at the same station, e.g. Stuttgart's underground S21 platforms —
+// not a different place).
+function cleanStationName(name) {
+  if (!name) return name;
+  return name
+    .replace(/^S\+U\s+/, '')
+    .replace(/\bHauptbahnhof\b/g, 'Hbf')
+    .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
+    .trim();
+}
+// Some feed rows report a bare platform label with no city at all (seen:
+// Stuttgart's "Hauptbahnhof (oben)" with nothing in front of it) — after
+// cleanStationName that collapses to just "Hbf", worse than useless as a
+// destination name. Since it's still a real, often geographically distant
+// station, the farthest-endpoint heuristic would otherwise happily prefer
+// it over a nearer but properly-named alternative — reject it outright.
+function isNamelessHbf(name) {
+  return !name || /^Hbf$/i.test(name) || /^Hauptbahnhof/i.test(name);
+}
+// Squared lat/lon distance — a cheap, monotonic "how far apart" proxy (no
+// need for true great-circle accuracy, just a consistent ranking signal).
+function placeDist(a, b) {
+  if (a?.lat == null || b?.lat == null) return -1;
+  const dLat = a.lat - b.lat, dLon = a.lon - b.lon;
+  return dLat * dLat + dLon * dLon;
 }
 // A low-frequency stop's board can force MOTIS's `n` (minimum result count)
 // past the requested `window`, reaching a whole extra calendar day ahead
@@ -980,14 +1284,18 @@ function dedupeCuratedVsDynamic() {
 // run can still surface as multiple near-identical rows — e.g.
 // transitous.org serving overlapping rows for the same trip from different
 // underlying feeds (confirmed for RE7/TER even after the numKey
-// normalization in classifyEntry). Collapse anything sharing
-// type+number+scheduled time down to one row, keeping whichever copy
-// carries the most information.
+// normalization in classifyEntry; also confirmed as two rows ~30min apart
+// at the *same* crossing station — different feed segmentations reporting
+// slightly different times for what's the same physical crossing). Grouped
+// by type+number+crossing-station rather than exact time: a given number
+// only crosses a specific border station once a day in practice, so this
+// doesn't risk merging genuinely different same-day reuses (those differ in
+// chStation or are caught by the cross-poll ±15min tolerance elsewhere).
 function dedupeSameRunDuplicates() {
-  const byKey = new Map(); // "type|number|chTime" -> [train, ...]
+  const byKey = new Map(); // "type|number|chStation" -> [train, ...]
   TRAINS.forEach(t => {
     if (t._hiddenDuplicate) return; // already resolved by dedupeAliasedStations
-    const key = t.type + '|' + numKey(t.id) + '|' + t.chTime;
+    const key = t.type + '|' + numKey(t.id) + '|' + t.chStation;
     (byKey.get(key) || byKey.set(key, []).get(key)).push(t);
   });
   byKey.forEach(list => {
@@ -1058,13 +1366,31 @@ async function resolveBorderStopIds() {
 // Domodossola with repeated params, dozens with the comma-joined form).
 // This was the main reason EC/RJX/TGV trains at those stations appeared to
 // have "no data" at all.
-async function fetchStopTimes(stopId, extraModes) {
+async function fetchStopTimes(stopId, extraModes, arriveBy) {
   const modes = (extraModes || RAIL_MODES).join(',');
-  const params = new URLSearchParams({stopId, arriveBy: 'false', n: '120', window: String(13 * 3600), mode: modes});
+  const params = new URLSearchParams({stopId, arriveBy: arriveBy ? 'true' : 'false', n: '120', window: String(13 * 3600), mode: modes});
+  // arriveBy=true means "arrive BY this deadline" — with no explicit `time`
+  // it defaults to now and only looks *backward*, i.e. arrivals that
+  // already happened. Confirmed: RE7 5337/5339 (arriving later today)
+  // never appeared without this, while a large `n` forced the search back
+  // to yesterday's occurrence instead. Push the deadline to the edge of our
+  // own lookahead horizon so upcoming arrivals are actually included.
+  if (arriveBy) params.set('time', new Date(Date.now() + 13 * 3600 * 1000).toISOString());
   const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params.toString());
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
   return data.stopTimes || [];
+}
+// arriveBy=false alone only lists trains *departing* the stop — a train
+// that terminates there (or one we'd otherwise only catch on its way in)
+// never shows up. Fetch both directions and merge (dynKey-based dedup
+// downstream collapses the inevitable overlap for through-running trains).
+async function fetchStopTimesBothDirections(stopId, extraModes) {
+  const [departures, arrivals] = await Promise.all([
+    fetchStopTimes(stopId, extraModes, false),
+    fetchStopTimes(stopId, extraModes, true),
+  ]);
+  return departures.concat(arrivals);
 }
 
 // A run's category+number can show up as "ICE 101" in tripShortName, or as
@@ -1088,18 +1414,58 @@ function classifyEntry(e) {
   return null;
 }
 
-// Stations/categories where transitous.org's realtime coverage is thin —
-// see the comment at the call site in pollOpendata.
-const FALLBACK_STATIONS = ['Chiasso', 'Domodossola', 'Buchs SG', 'St. Margrethen'];
-async function fetchOpendataFallbackBoard(stationName) {
+// ─── SWISS-PREFERRED REALTIME SOURCE (regional data sovereignty) ─────────────
+// The brief asked for OpenTransportData.swiss's SIRI-ET feed as the
+// preferred/fallback realtime source for the Swiss network, with a hard
+// rule that it may only ever affect Swiss stops and must never override
+// Transitous abroad. Implemented against transport.opendata.ch instead of
+// SIRI-ET itself: SIRI-ET needs a Bearer API key, and this dashboard is a
+// single static HTML file with no backend to keep that key off the client
+// — exactly the exposure this session already removed once (the old
+// GEOPS_KEY). transport.opendata.ch is the public, key-free wrapper around
+// the same underlying SBB "Ist-Daten" realtime feed SIRI-ET is built from,
+// so it fills the same architectural role (regional CH authority) without
+// the key/proxy problem or SIRI-ET's ~100MB-response/2-req-per-minute
+// limits. If a genuine SIRI-ET key + backend proxy become available later,
+// only fetchChStationboard/fetchChLiveForStop below need to change — the
+// isSwissStop/canApplyChSource guards and the merge logic around them stay
+// the same either way.
+
+// Hard boundary check — reused everywhere a CH-source value is considered.
+// Deliberately NOT a name check ("contains 'Basel'" etc.) — uses the same
+// timezone-based country resolution as the rest of the app (placeCountry).
+// Domodossola is the one BORDER_STATIONS entry that is NOT Swiss (it's the
+// Italian-side crossing station) — isSwissStop must say false for it.
+function isSwissStop(stop) {
+  return placeCountry(stop) === 'CH';
+}
+// The single hard gate every CH-source value must pass before being
+// applied. Kept as its own function (identical body to isSwissStop) so the
+// intent reads unambiguously at every call site, per the "never a name
+// check" requirement.
+function canApplyChSource(stop) {
+  return isSwissStop(stop);
+}
+
+// Every border/crossing station this dashboard watches, except Domodossola
+// (Italy) — the Swiss-network stationboard has nothing to say about a
+// non-Swiss stop, so it's excluded rather than silently returning nothing.
+const CH_SOURCE_STATIONS = BORDER_STATIONS.map(s => s.name).filter(name => name !== 'Domodossola');
+async function fetchChStationboard(stationName) {
   const url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
   return data.stationboard || [];
 }
+// Row-level pass: for every currently-tracked train whose *crossing*
+// station is on Swiss soil, the CH source wins over whatever Transitous
+// already reported (rule: within Switzerland, CH source > Transitous) —
+// not just a gap-filler. chStation itself already encodes "is this
+// crossing point Swiss", so no extra per-row country lookup is needed here.
 async function enrichFromOpendataFallback() {
-  const results = await Promise.all(FALLBACK_STATIONS.map(name => fetchOpendataFallbackBoard(name).catch(() => [])));
+  const results = await Promise.all(CH_SOURCE_STATIONS.map(name => fetchChStationboard(name).catch(() => [])));
+  let chMatches = 0;
   results.forEach(rows => rows.forEach(entry => {
     const type = CATEGORY_MAP[entry.category];
     if (!type) return;
@@ -1108,47 +1474,32 @@ async function enrichFromOpendataFallback() {
     const chTime = hhmmZurich(scheduledIso);
     const nk = numKey(entry.number);
     const train = TRAINS.find(t => t.type === type && numKey(t.id) === nk
-      && circDiff(toMin(chTime), t._schedMin) <= 15);
-    if (!train || train.delayKnown) return; // only fill a genuine gap, never override transitous's own data
-    if (typeof entry.stop?.delay !== 'number') return;
+      && circDiff(toMin(chTime), t._schedMin) <= 15 && t.chStation !== 'Domodossola');
+    if (!train) return;
+    if (typeof entry.stop?.delay !== 'number') return; // CH source has no confirmed value here — leave whatever Transitous already found
     train.delay = entry.stop.delay;
     train.status = entry.stop.delay > 5 ? 'delayed' : 'on-time';
     train.delayKnown = true;
+    train.delaySource = 'opendata.ch';
+    chMatches++;
     train.liveSeen = true;
   }));
+  console.log(`[opendata.ch/CH-source] ${chMatches} row-level match(es) this poll`);
 }
 
-// tripId -> {from, to} once resolved via /api/v6/trip, or null while a
-// fetch for that tripId is in flight/failed (guards against re-fetching the
-// same trip every poll — the real endpoints don't change during the day).
-const tripEndpointCache = new Map();
-async function resolveTripEndpoints(t) {
-  tripEndpointCache.set(t.tripId, null);
-  try {
-    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(t.tripId));
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const legs = data.legs || [];
-    if (!legs.length) return;
-    const trueFrom = legs[0].from?.name;
-    const trueTo = legs[legs.length - 1].to?.name;
-    // German hub stations sometimes resolve to a specific platform level
-    // ("Hauptbahnhof (oben/unten/tief)") rather than the real distant
-    // terminus — a real intercity endpoint never carries that qualifier, so
-    // treat it as a bad resolution and keep the existing from/to instead.
-    const looksLikeLocalPlatform = s => /\((oben|unten|tief)\)/i.test(s || '');
-    if (!trueFrom || !trueTo || trueFrom === trueTo
-      || looksLikeLocalPlatform(trueFrom) || looksLikeLocalPlatform(trueTo)) return;
-    tripEndpointCache.set(t.tripId, {from: trueFrom, to: trueTo});
-    // Re-find by _id: this train object may have been replaced by a later
-    // poll's dedup pass by the time this fetch resolves.
-    const live = TRAINS.find(x => x._id === t._id);
-    if (live && live.tripId === t.tripId) {
-      live.from = trueFrom; live.to = trueTo;
-      applyFilters();
-    }
-  } catch (e) { /* leave the stoptimes-derived from/to as-is */ }
-}
+// Tried resolving the "true" origin/destination live via /api/v6/trip's
+// joined/interlined legs — dropped it. Verified unreliable: whether a given
+// tripId's own GTFS chain includes the full journey (e.g. Hamburg→Chur) or
+// only a sub-segment (e.g. just Freiburg→Chur) varies by which physical
+// instance of a line got polled, since DB's interlining/coupling isn't
+// consistently represented across trip_ids. That produced wrong corrections
+// (ICE 107 got overwritten from the correct curated "Hamburg Hbf" to a
+// wrong "Basel Bad Bf"). Endpoints now come from two sources only:
+// - Curated (BASE_TRAINS) rows: never touched by live data at all — the
+//   timetabled from/to is authoritative, cancellations included. Where
+//   curated data itself was wrong (e.g. ICE 279, confirmed via its own
+//   Zuglauf), it's corrected by hand in BASE_TRAINS instead.
+// - Dynamically-discovered rows: see the farthest-endpoint heuristic below.
 
 async function pollOpendata() {
   try {
@@ -1156,7 +1507,7 @@ async function pollOpendata() {
 
     const results = await Promise.all(
       BORDER_STATIONS.filter(st => st.stopId).map(st =>
-        fetchStopTimes(st.stopId).then(rows => ({st, rows})).catch(() => ({st, rows: []}))
+        fetchStopTimesBothDirections(st.stopId).then(rows => ({st, rows})).catch(() => ({st, rows: []}))
       )
     );
 
@@ -1170,7 +1521,7 @@ async function pollOpendata() {
     const baselSBB = BORDER_STATIONS.find(s => s.name === 'Basel SBB');
     if (baselSBB?.stopId) {
       try {
-        const regionalRows = await fetchStopTimes(baselSBB.stopId, ['REGIONAL_RAIL']);
+        const regionalRows = await fetchStopTimesBothDirections(baselSBB.stopId, ['REGIONAL_RAIL']);
         results.push({st: baselSBB, rows: regionalRows});
       } catch (e) { /* optional — main poll still succeeds without it */ }
     }
@@ -1178,7 +1529,7 @@ async function pollOpendata() {
     // Guards against creating a duplicate *dynamic* row for the same
     // physical train within one poll. Curated trains are still updated from
     // every matching row below.
-    const dynamicCreated = new Set();
+    const dynamicCreated = new Map(); // dynKey -> the train object created for it this poll
     let anyOk = false;
 
     results.forEach(({st, rows}) => {
@@ -1209,6 +1560,19 @@ async function pollOpendata() {
         let train = TRAINS.find(t => t.type === cls.type && numKey(t.id) === nk
           && circDiff(toMin(chTime), t._schedMin) <= 15);
 
+        // A feed can report the same physical run with a truncated
+        // endpoint (a nearby intermediate stop) alongside a fuller one from
+        // a different underlying source (confirmed: EC 65 as both
+        // "→Domodossola" and "→Milano Centrale"; IC 486 as both
+        // "→Singen" and "→Stuttgart Hbf"; TER 96254 as both "→Saint-Louis"
+        // and "→Strasbourg"). The foreign endpoint that's farther from the
+        // Swiss crossing point is reliably the more complete/correct one —
+        // a truncated feed variant always shows the *nearer* stop, never a
+        // farther one. Only ever used to widen an entry's reach, never to
+        // shrink it back down.
+        const foreignPlace = placeCountry(e.tripFrom) !== 'CH' ? e.tripFrom : e.tripTo;
+        const foreignDist = placeDist(foreignPlace, e.place);
+
         if (train) {
           // Any live match at all — even before delay is known — confirms
           // this curated schedule slot genuinely exists on today's live
@@ -1218,17 +1582,41 @@ async function pollOpendata() {
           if (delayKnown) { train.delay = delayMin; train.status = status; train.delayKnown = true; }
           train.chTime = chTime; // keep in sync with actual live schedule/track
           train.tripId = e.tripId; // powers the "Zuglauf" expand feature
+          // Curated (BASE_TRAINS) rows are never touched — their
+          // timetabled from/to is authoritative regardless of what any live
+          // row shows, cancellations included. Dynamically-discovered rows
+          // do get widened by a farther-reaching sighting — except from a
+          // *cancelled* one: a cancelled row's own tripFrom/tripTo often
+          // reflects whatever's still actually running (e.g. only the
+          // Freiburg→Berlin remainder of a Basel SBB→Berlin service cut
+          // short), not the originally-scheduled full journey — exactly the
+          // same "must stay timetabled, not effective" rule as curated rows,
+          // just discovered live instead of hand-entered.
+          if (train._id >= 100000 && !cancelled && foreignDist > (train._foreignDist ?? -1)) {
+            const from2 = cleanStationName(e.tripFrom?.name), to2 = cleanStationName(e.tripTo?.name);
+            if (from2 && to2 && from2 !== to2 && !isNamelessHbf(from2) && !isNamelessHbf(to2)) {
+              train.from = from2; train.to = to2; train._foreignDist = foreignDist;
+            }
+          }
           return;
         }
 
-        const dynKey = cls.type + '|' + nk;
-        if (dynamicCreated.has(dynKey)) return;
+        // Includes an hourly time-bucket — without it, a reused number many
+        // hours later in the day (confirmed: EC 94 at 21:09 Bregenz→Zürich,
+        // an unrelated later service, not the same physical train as the
+        // EC 94 crossing hours earlier) collided with the real one under
+        // the same key, and "farthest endpoint wins" then merged the wrong
+        // train's endpoint into it. The hour bucket is coarse enough to
+        // still treat genuine minutes-apart feed duplicates (the case this
+        // dedup exists for) as the same key.
+        const dynKey = cls.type + '|' + nk + '|' + Math.round(toMin(chTime) / 60);
 
-        // tripFrom/tripTo are the run's true, live-confirmed origin and
-        // destination — no more guessing from a truncated passList like the
-        // old opendata.ch integration had to.
-        const from = e.tripFrom?.name, to = e.tripTo?.name;
-        if (!from || !to || from === to) return;
+        // tripFrom/tripTo are the run's live-confirmed origin and
+        // destination for this specific feed row — see the farthest-
+        // endpoint comment above for why duplicates get compared, not just
+        // first-wins deduped.
+        const from = cleanStationName(e.tripFrom?.name), to = cleanStationName(e.tripTo?.name);
+        if (!from || !to || from === to || isNamelessHbf(from) || isNamelessHbf(to)) return;
         // Purely domestic runs (both ends in Switzerland) share our watched
         // categories too (e.g. an IC that never leaves CH, or an RE7/TER
         // that's the Basel SBB↔Basel Bad Bf domestic hop) — this dashboard
@@ -1242,13 +1630,18 @@ async function pollOpendata() {
         // Basel toward France/Italy (or via Schaffhausen/St. Margrethen at
         // all) keep their real crossing station.
         let chStation = st.name;
-        if (chStation === 'Basel SBB') {
-          const foreignEnd = placeCountry(e.tripFrom) !== 'CH' ? e.tripFrom : e.tripTo;
-          if (placeCountry(foreignEnd) === 'DE') chStation = 'Basel Bad Bf';
+        if (chStation === 'Basel SBB' && placeCountry(foreignPlace) === 'DE') chStation = 'Basel Bad Bf';
+
+        const existingCandidate = dynamicCreated.get(dynKey);
+        if (existingCandidate) {
+          if (foreignDist > existingCandidate._foreignDist) {
+            existingCandidate.from = from; existingCandidate.to = to; existingCandidate.chStation = chStation;
+            existingCandidate._foreignDist = foreignDist;
+          }
+          return;
         }
 
-        dynamicCreated.add(dynKey);
-        TRAINS.push({
+        const newTrain = {
           id: `${cls.type} ${nk}`,
           from, to,
           // tripFrom's own scheduled departure is the run's true origin
@@ -1262,9 +1655,12 @@ async function pollOpendata() {
           status,
           delayKnown,
           tripId: e.tripId,
+          _foreignDist: foreignDist,
           _id: dynamicSeq++,
           _schedMin: toMin(chTime), // lets later polls re-match this same entry instead of duplicating it
-        });
+        };
+        dynamicCreated.set(dynKey, newTrain);
+        TRAINS.push(newTrain);
       });
     });
 
@@ -1287,26 +1683,31 @@ async function pollOpendata() {
     applyFilters();
     stamp();
 
-    // /stoptimes' tripFrom/tripTo only reflect whichever single GTFS leg is
-    // active at the polled station — for a line DB runs as multiple
-    // chained/interlined trip_ids under one human-facing number (confirmed:
-    // ICE 105 Hamburg→Chur showed as "Frankfurt Hbf→Chur" in the table
-    // because Basel Bad Bf's own leg only covers Frankfurt onward), that's
-    // just the active leg, not the true end-to-end journey. /api/v6/trip
-    // (with its default joinInterlinedLegs) does resolve the full journey —
-    // it's just not fetched during the main loop above to keep the 30s poll
-    // itself cheap. Fire off a one-time-per-tripId correction in the
-    // background instead; resolveTripEndpoints re-renders once it lands.
+    // Resolve which part of the route is actually cancelled, in the
+    // background (see resolveCancelledSegment) — once per tripId, not every
+    // poll, since it needs its own handful of extra fetches per stop.
     TRAINS.forEach(t => {
-      // A cancelled service's /trip shape is unreliable (seen resolving to
-      // a nearby local stop name instead of the real distant terminus) —
-      // leave from/to as last confirmed rather than risk corrupting it.
-      if (!t.tripId || t.status === 'cancelled') return;
-      if (tripEndpointCache.has(t.tripId)) {
-        const cached = tripEndpointCache.get(t.tripId);
-        if (cached) { t.from = cached.from; t.to = cached.to; }
-      } else {
-        resolveTripEndpoints(t);
+      if (t.status === 'cancelled' && t.tripId && t._segmentFetchedFor !== t.tripId) {
+        t._segmentFetchedFor = t.tripId;
+        resolveCancelledSegment(t);
+      }
+    });
+
+    // /stoptimes' tripFrom/tripTo only reflect whichever single GTFS leg is
+    // active at the polled station (confirmed: EC 94 showed "St. Margrethen
+    // SG" as its own origin at that stop, when the physical run genuinely
+    // starts at München Hbf). /api/v6/trip's joined leg *does* have the
+    // full chain (verified directly against this exact case) — dropped
+    // relying on it earlier only because it also touched curated rows, and
+    // a cancelled trip's /trip shape came back nameless/wrong. Neither risk
+    // applies to a dynamic row once cancelled + nameless results are
+    // filtered out, so it's safe to use here as a background, once-per-
+    // tripId correction (fires only for rows still on their original
+    // stoptimes-derived name, not on every poll).
+    TRAINS.forEach(t => {
+      if (t._id >= 100000 && t.status !== 'cancelled' && t.tripId && t._routeFetchedFor !== t.tripId) {
+        t._routeFetchedFor = t.tripId;
+        resolveDynamicRouteEndpoints(t);
       }
     });
   } catch (e) {
@@ -1334,8 +1735,9 @@ function stamp() {
 
 // ─── UI BINDINGS ──────────────────────────────────────────────────────────────
 document.getElementById('filter-toggle-btn').addEventListener('click', (e) => {
-  document.querySelector('.main').classList.toggle('filters-hidden');
-  e.currentTarget.classList.toggle('active');
+  const collapsed = document.querySelector('.sidebar').classList.toggle('collapsed');
+  e.currentTarget.textContent = collapsed ? '›' : '‹';
+  e.currentTarget.title = collapsed ? 'Filter einblenden' : 'Filter ausblenden';
 });
 document.querySelectorAll('.hz-btn').forEach(b =>
   b.addEventListener('click', () => {
@@ -1391,11 +1793,72 @@ document.querySelectorAll('thead th[data-col]').forEach(th => {
 });
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
-applyFilters();
-stamp();
-pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
-setInterval(pollOpendata, 30000);        // refresh live delays every 30s
-setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
+// Gated by the password screen — see ─── AUTH GATE ─── below. Nothing here
+// fires (no polling, no rendering) until authentication succeeds, so a
+// visitor who never gets past the password screen never even triggers the
+// realtime requests.
+function startApp() {
+  applyFilters();
+  stamp();
+  pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
+  setInterval(pollOpendata, 30000);        // refresh live delays every 30s
+  setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
+}
+
+// ─── AUTH GATE ────────────────────────────────────────────────────────────────
+// Deliberately not real security — there is no backend, so anything shipped
+// to the browser can be read by whoever opens dev tools, no matter how it's
+// encoded. This only keeps casual/accidental visitors out (a colleague
+// stumbling on the link, a search engine, etc.): the password itself isn't
+// dumped in the page as plain text — only a SHA-256 hash of it is, so a
+// glance at "view source" doesn't hand it over directly — but the check
+// itself is still visible and bypassable to anyone who actually looks.
+// SHA-256("Hermonitor0123")
+const AUTH_HASH = 'c606431a0d63e7f8ce71b89ad539e4d3352318e4f0720793dce146ee6c07e256';
+const AUTH_SESSION_KEY = 'hermonitor_auth_ok';
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function unlockApp() {
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.body.classList.remove('auth-locked');
+  startApp();
+}
+
+if (sessionStorage.getItem(AUTH_SESSION_KEY) === '1') {
+  unlockApp();
+} else {
+  document.body.classList.add('auth-locked');
+  const form = document.getElementById('auth-form');
+  const input = document.getElementById('auth-password');
+  const errorEl = document.getElementById('auth-error');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    let hash;
+    try {
+      hash = await sha256Hex(input.value);
+    } catch (err) {
+      // crypto.subtle needs a secure context (https, or localhost while
+      // testing) — file:// won't have it. Once actually deployed over
+      // https this branch never runs.
+      errorEl.textContent = 'Login benötigt eine sichere Verbindung (https).';
+      return;
+    }
+    if (hash === AUTH_HASH) {
+      sessionStorage.setItem(AUTH_SESSION_KEY, '1');
+      errorEl.textContent = '';
+      unlockApp();
+    } else {
+      errorEl.textContent = 'Falsches Passwort.';
+      input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake');
+      input.value = '';
+      input.focus();
+    }
+  });
+}
 </script>
 </body>
 </html>
