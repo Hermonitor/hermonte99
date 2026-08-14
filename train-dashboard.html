@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CH Fernzug Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500&family=Azeret+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: oklch(14% 0.008 240);
+    --bg2: oklch(18% 0.008 240);
+    --bg3: oklch(22% 0.010 240);
+    --border: oklch(30% 0.010 240);
+    --text: oklch(90% 0.005 240);
+    --text2: oklch(65% 0.008 240);
+    --amber: oklch(78% 0.18 75);
+    --amber-dim: oklch(55% 0.12 75);
+    --green: oklch(72% 0.18 145);
+    --red: oklch(62% 0.22 25);
+    --yellow: oklch(82% 0.18 90);
+    --blue: oklch(68% 0.16 240);
+    --purple: oklch(65% 0.16 290);
+    --teal: oklch(70% 0.14 190);
+    --pink: oklch(68% 0.16 340);
+    --font-display: 'Barlow Condensed', sans-serif;
+    --font-body: 'Barlow', sans-serif;
+    --font-mono: 'Azeret Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; min-height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 12px 20px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  }
+  .logo { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: 0.04em; color: var(--amber); text-transform: uppercase; }
+  .logo span { color: var(--text2); font-weight: 400; }
+  .header-kpis { display: flex; gap: 20px; margin-left: auto; flex-wrap: wrap; }
+  .kpi { text-align: center; }
+  .kpi-val { font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1; }
+  .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); margin-top: 2px; }
+  .kpi-val.green { color: var(--green); }
+  .kpi-val.yellow { color: var(--yellow); }
+  .kpi-val.red { color: var(--red); }
+  .kpi-val.amber { color: var(--amber); }
+
+  .connection-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text2); padding: 4px 10px; border: 1px solid var(--border); border-radius: 3px; }
+  .filter-toggle-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; padding: 6px 12px; border-radius: 3px; cursor: pointer; text-transform: uppercase; transition: all 0.15s; }
+  .filter-toggle-btn:hover { color: var(--amber); border-color: var(--amber-dim); }
+  .filter-toggle-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--bg); }
+  .main.filters-hidden .sidebar { display: none; }
+  .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text2); flex-shrink: 0; }
+  .conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+  .conn-dot.error { background: var(--red); }
+  .conn-dot.warn { background: var(--amber-dim); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+  .content { flex: 1; overflow: auto; padding: 16px; }
+
+  .filter-group { display: flex; flex-direction: column; gap: 6px; }
+  .filter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--amber-dim); font-family: var(--font-display); font-weight: 600; }
+  .filter-select, .filter-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 6px 8px; border-radius: 3px; width: 100%; outline: none; }
+  .filter-select:focus, .filter-input:focus { border-color: var(--amber-dim); }
+  .filter-input::placeholder { color: var(--text2); }
+
+  .horizon-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .hz-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-mono); font-size: 12px; padding: 5px 2px; text-align: center; cursor: pointer; border-radius: 3px; transition: all 0.15s; }
+  .hz-btn:hover { border-color: var(--amber-dim); color: var(--text); }
+  .hz-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--bg); font-weight: 600; }
+
+  .reload-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--amber); font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 0.05em; padding: 8px; text-align: center; cursor: pointer; border-radius: 3px; text-transform: uppercase; transition: all 0.15s; width: 100%; }
+  .reload-btn:hover { background: var(--amber-dim); color: var(--bg); }
+
+  .last-update { font-size: 10px; color: var(--text2); font-family: var(--font-mono); text-align: center; line-height: 1.4; }
+
+  .type-filter-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+  .type-pill { font-family: var(--font-mono); font-size: 11px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 2px; cursor: pointer; background: var(--bg3); color: var(--text2); transition: all 0.15s; }
+  .type-pill:hover { border-color: var(--amber-dim); color: var(--text); }
+  .type-pill.active { color: var(--bg); font-weight: 600; }
+  .type-pill.active[data-type="all"] { background: var(--amber-dim); border-color: var(--amber); color: var(--text); }
+  .type-pill.active[data-type="ICE"] { background: var(--blue); border-color: var(--blue); }
+  .type-pill.active[data-type="TGV"] { background: var(--red); border-color: var(--red); }
+  .type-pill.active[data-type="EC"]  { background: var(--green); border-color: var(--green); }
+  .type-pill.active[data-type="IC"]  { background: var(--amber-dim); border-color: var(--amber); }
+  .type-pill.active[data-type="RJX"] { background: var(--purple); border-color: var(--purple); }
+  .type-pill.active[data-type="NJ"]  { background: oklch(30% 0.04 240); border-color: oklch(40% 0.06 240); color: var(--text); }
+  .type-pill.active[data-type="RE7"] { background: var(--teal); border-color: var(--teal); }
+  .type-pill.active[data-type="TER"] { background: var(--pink); border-color: var(--pink); }
+
+  .result-count { font-size: 11px; color: var(--text2); font-family: var(--font-mono); margin-bottom: 8px; }
+  .table-wrap { min-width: 920px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th { font-family: var(--font-display); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+  thead th:hover { color: var(--amber); }
+  thead th.sorted { color: var(--amber); }
+
+  tbody tr { border-bottom: 1px solid oklch(20% 0.008 240); transition: background 0.1s; cursor: pointer; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody tr.selected { background: oklch(20% 0.015 240); }
+  td { padding: 8px 10px; font-size: 13px; white-space: nowrap; vertical-align: middle; }
+
+  tr.now-marker { cursor: default; border-bottom: none; }
+  tr.now-marker:hover { background: transparent; }
+  tr.now-marker td { padding: 4px 10px; display: flex; align-items: center; gap: 10px; }
+  .now-marker-line { flex: 1; height: 1px; background: var(--amber); opacity: 0.5; }
+  .now-marker-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--amber); white-space: nowrap; }
+
+  .td-train { font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+  .zuglauf-toggle { font-family: var(--font-body); font-size: 10px; font-weight: 400; color: var(--text2); cursor: pointer; margin-top: 1px; }
+  .zuglauf-toggle:hover { color: var(--amber); text-decoration: underline; }
+  .zuglauf-msg { color: var(--text2); font-size: 12px; padding: 6px 0; }
+  .zuglauf-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .zuglauf-table th { font-family: var(--font-display); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .zuglauf-table td { font-size: 12px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); }
+  .td-time { font-family: var(--font-mono); font-size: 13px; }
+  .td-delay { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
+  .delay-0 { color: var(--green); }
+  .delay-low { color: var(--yellow); }
+  .delay-high { color: var(--red); }
+
+  .type-badge { display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 2px 6px; border-radius: 2px; min-width: 36px; text-align: center; }
+  .badge-ICE { background: oklch(22% 0.06 240); color: var(--blue); border: 1px solid oklch(35% 0.10 240); }
+  .badge-TGV { background: oklch(22% 0.06 25); color: var(--red); border: 1px solid oklch(30% 0.10 25); }
+  .badge-EC  { background: oklch(20% 0.06 145); color: var(--green); border: 1px solid oklch(30% 0.10 145); }
+  .badge-IC  { background: oklch(22% 0.06 75); color: var(--amber); border: 1px solid oklch(32% 0.10 75); }
+  .badge-RJX { background: oklch(22% 0.06 290); color: var(--purple); border: 1px solid oklch(32% 0.10 290); }
+  .badge-NJ  { background: oklch(16% 0.03 240); color: var(--text2); border: 1px solid var(--border); }
+  .badge-RE7 { background: oklch(22% 0.06 190); color: var(--teal); border: 1px solid oklch(32% 0.10 190); }
+  .badge-TER { background: oklch(22% 0.06 340); color: var(--pink); border: 1px solid oklch(32% 0.10 340); }
+
+  .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-family: var(--font-mono); padding: 2px 8px; border-radius: 2px; white-space: nowrap; }
+  .status-badge::before { content:''; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .s-ontime   { background: oklch(18% 0.06 145); color: var(--green); border: 1px solid oklch(28% 0.10 145); }
+  .s-ontime::before { background: var(--green); }
+  .s-delayed  { background: oklch(18% 0.06 25); color: var(--red); border: 1px solid oklch(28% 0.10 25); }
+  .s-delayed::before { background: var(--red); }
+  .s-warning  { background: oklch(18% 0.06 75); color: var(--yellow); border: 1px solid oklch(28% 0.10 75); }
+  .s-warning::before { background: var(--yellow); }
+  .s-cancelled { background: oklch(16% 0.03 25); color: oklch(55% 0.10 25); border: 1px solid oklch(25% 0.06 25); }
+  .s-cancelled::before { background: oklch(40% 0.10 25); }
+  .s-unknown  { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+  .s-unknown::before { background: var(--text2); }
+
+  .region-chip { font-size: 10px; font-family: var(--font-mono); color: var(--text2); opacity: 0.7; }
+
+  .detail-panel { position: fixed; right: 0; top: 0; bottom: 0; width: 420px; background: var(--bg2); border-left: 1px solid var(--border); padding: 24px 16px; overflow-y: auto; overflow-x: hidden; transform: translateX(100%); transition: transform 0.2s ease; z-index: 100; }
+  .detail-panel.open { transform: translateX(0); }
+  .detail-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+  .detail-close:hover { color: var(--text); }
+  .detail-train { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: var(--amber); }
+  .detail-route { font-size: 13px; color: var(--text2); margin: 4px 0 20px; }
+  .detail-row { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; gap: 12px; }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-key { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0; }
+  .detail-val { font-family: var(--font-mono); text-align: right; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+  .empty-state h3 { font-family: var(--font-display); font-size: 24px; margin-bottom: 8px; color: var(--amber-dim); }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">CH Fernzug <span>Monitor</span></div>
+  <button class="filter-toggle-btn" id="filter-toggle-btn" title="Filter ein-/ausblenden">☰ Filter</button>
+  <div class="header-kpis">
+    <div class="kpi"><div class="kpi-val amber" id="kpi-total">–</div><div class="kpi-label">Züge</div></div>
+    <div class="kpi"><div class="kpi-val green" id="kpi-ontime">–</div><div class="kpi-label">Pünktlich</div></div>
+    <div class="kpi"><div class="kpi-val yellow" id="kpi-delayed">–</div><div class="kpi-label">Verspätet</div></div>
+    <div class="kpi"><div class="kpi-val red" id="kpi-cancelled">–</div><div class="kpi-label">Ausfall</div></div>
+    <div class="kpi"><div class="kpi-val" id="kpi-unknown" style="color:var(--text2)">–</div><div class="kpi-label">Unbekannt</div></div>
+    <div class="kpi"><div class="kpi-val amber" id="kpi-avgdelay">–</div><div class="kpi-label">Ø Verspätung</div></div>
+  </div>
+  <div class="connection-badge">
+    <div class="conn-dot" id="conn-dot"></div>
+    <span id="conn-label">Verbinde…</span>
+  </div>
+</header>
+
+<div class="main">
+  <aside class="sidebar">
+    <div class="filter-group">
+      <div class="filter-label">Zeithorizont</div>
+      <div class="horizon-buttons" id="horizon-btns">
+        <div class="hz-btn" data-h="2">+2h</div>
+        <div class="hz-btn" data-h="4">+4h</div>
+        <div class="hz-btn" data-h="6">+6h</div>
+        <div class="hz-btn" data-h="8">+8h</div>
+        <div class="hz-btn" data-h="10">+10h</div>
+        <div class="hz-btn" data-h="12">+12h</div>
+      </div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Suche</div>
+      <input class="filter-input" id="search-input" type="text" placeholder="Zugnr, Bahnhof …">
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Sortierung</div>
+      <select class="filter-select" id="sort-select">
+        <option value="chTime">CH-Grenzzeit</option>
+        <option value="delay">Verspätung</option>
+        <option value="to">Zielbahnhof</option>
+        <option value="from">Startbahnhof</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Status</div>
+      <select class="filter-select" id="status-filter">
+        <option value="all">Alle</option>
+        <option value="on-time">Pünktlich</option>
+        <option value="delayed">Verspätet</option>
+        <option value="cancelled">Ausfall</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Zugtyp</div>
+      <div class="type-filter-grid" id="type-filter">
+        <div class="type-pill active" data-type="all">Alle</div>
+        <div class="type-pill" data-type="ICE">ICE</div>
+        <div class="type-pill" data-type="TGV">TGV</div>
+        <div class="type-pill" data-type="EC">EC</div>
+        <div class="type-pill" data-type="IC">IC</div>
+        <div class="type-pill" data-type="RJX">RJX</div>
+        <div class="type-pill" data-type="NJ">NJ</div>
+        <div class="type-pill" data-type="RE7">RE7</div>
+        <div class="type-pill" data-type="TER">TER</div>
+      </div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Region</div>
+      <select class="filter-select" id="region-filter">
+        <option value="all">Alle Regionen</option>
+        <option value="nord">Nord (Basel SBB / Bad Bf)</option>
+        <option value="ost">Ost (Schaffhausen / St.Margrethen / Buchs SG / Chiasso)</option>
+        <option value="west">West (Domodossola / Genève / Vallorbe)</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Grenzbahnhof</div>
+      <select class="filter-select" id="station-filter">
+        <option value="all">Alle Bahnhöfe</option>
+        <option value="Basel SBB">Basel SBB</option>
+        <option value="Basel Bad Bf">Basel Bad Bf</option>
+        <option value="Schaffhausen">Schaffhausen</option>
+        <option value="St. Margrethen">St. Margrethen</option>
+        <option value="Buchs SG">Buchs SG</option>
+        <option value="Chiasso">Chiasso</option>
+        <option value="Domodossola">Domodossola</option>
+        <option value="Genève">Genève</option>
+        <option value="Vallorbe">Vallorbe</option>
+      </select>
+    </div>
+    <button class="reload-btn" id="reload-btn">↻ Neu laden</button>
+    <div class="last-update" id="last-update">–</div>
+  </aside>
+
+  <main class="content">
+    <div class="result-count" id="result-count"></div>
+    <div class="table-wrap">
+      <table id="train-table">
+        <thead>
+          <tr>
+            <th data-col="id">Zug</th>
+            <th data-col="from">Von</th>
+            <th data-col="to">Nach</th>
+            <th data-col="chStation">CH-Grenze</th>
+            <th data-col="chTime">Prognose Grenze ↕</th>
+            <th data-col="status">Status</th>
+            <th data-col="delay">Verspätung ↕</th>
+          </tr>
+        </thead>
+        <tbody id="train-tbody"></tbody>
+      </table>
+      <div class="empty-state" id="empty-state" style="display:none">
+        <h3>Keine Züge gefunden</h3>
+        <p>Im gewählten Zeitfenster keine Züge. Horizont erweitern oder Filter anpassen.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="detail-panel" id="detail-panel">
+  <button class="detail-close" id="detail-close">✕</button>
+  <div id="detail-content"></div>
+</div>
+
+<script>
+// ─── REALTIME DATA SOURCE ─────────────────────────────────────────────────────
+// transitous.org (MOTIS v2 API, api.transitous.org) — a free, no-key,
+// CORS-enabled, community-run realtime routing service covering DE/CH/FR/
+// AT/IT rail data. Replaces the earlier transport.opendata.ch source, which
+// only reported realtime info for trains already close to departure and
+// had no cancellation field at all. transitous.org's /stoptimes and /trip
+// endpoints report `realTime`/`cancelled` per stop directly from the
+// GTFS-RT feeds it aggregates, and /trip additionally returns a train's
+// full stop-by-stop run (used for the "Zuglauf" expand feature below).
+
+// ─── TRAIN DATA (GTFS 2026, corrected from Excel) ────────────────────────────
+// chTime = scheduled time at Swiss border crossing station
+const BASE_TRAINS = [
+
+  // ── REGION NORD: Via Basel Bad Bf (ICE Germany↔Switzerland) ─────────────
+
+  // ICE Inbound (Germany→CH): chTime = arrival at Basel Bad Bf from Germany
+  // Confirmed by user: this working actually starts at Karlsruhe Hbf, not
+  // Hamburg Hbf (line label reused from the ICE's usual long-haul routing;
+  // the live board is authoritative and will keep this in sync going forward).
+  {id:'ICE 271', from:'Karlsruhe Hbf', to:'Interlaken Ost', dep:'05:07', arr:'09:59', chTime:'07:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 275', from:'Frankfurt Hbf', to:'Chur',           dep:'06:50', arr:'12:22', chTime:'09:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 101', from:'Hamburg Hbf',   to:'Brig',           dep:'07:07', arr:'13:13', chTime:'10:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 277', from:'Frankfurt Hbf', to:'Chur',           dep:'08:50', arr:'14:22', chTime:'11:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 279', from:'Hamburg Hbf',   to:'Interlaken Ost', dep:'09:07', arr:'15:59', chTime:'13:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 105', from:'Frankfurt Hbf', to:'Chur',           dep:'10:50', arr:'17:22', chTime:'14:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 107', from:'Hamburg Hbf',   to:'Brig',           dep:'13:07', arr:'19:13', chTime:'16:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 373', from:'Frankfurt Hbf', to:'Chur',           dep:'14:50', arr:'20:22', chTime:'17:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 375', from:'Hamburg Hbf',   to:'Interlaken Ost', dep:'15:07', arr:'22:00', chTime:'19:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 377', from:'Frankfurt Hbf', to:'Brig',           dep:'18:50', arr:'00:55', chTime:'21:41', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+
+  // ICE Outbound (CH→Germany): chTime = departure from Basel Bad Bf into Germany
+  {id:'ICE 374', from:'Interlaken Ost',to:'Hamburg Hbf',    dep:'05:59', arr:'14:09', chTime:'08:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 372', from:'Brig',          to:'Hamburg Hbf',    dep:'07:41', arr:'17:09', chTime:'10:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 108', from:'Chur',          to:'Frankfurt Hbf',  dep:'08:38', arr:'14:04', chTime:'11:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 106', from:'Interlaken Ost',to:'Hamburg Hbf',    dep:'10:59', arr:'19:09', chTime:'13:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 104', from:'Chur',          to:'Frankfurt Hbf',  dep:'12:38', arr:'18:04', chTime:'15:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 276', from:'Brig',          to:'Frankfurt Hbf',  dep:'13:45', arr:'20:04', chTime:'16:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 100', from:'Interlaken Ost',to:'Hamburg Hbf',    dep:'16:59', arr:'01:09', chTime:'19:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+  {id:'ICE 272', from:'Chur',          to:'Frankfurt Hbf',  dep:'17:38', arr:'23:04', chTime:'20:23', chStation:'Basel Bad Bf', type:'ICE', region:'nord', operator:'DB/SBB'},
+
+  // ── REGION NORD: Via Basel SBB (TGV Lyria Zürich↔Paris) ─────────────────
+
+  // TGV Outbound Zürich→Paris
+  {id:'TGV 9206', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'06:59', arr:'11:07', chTime:'07:52', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9210', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'09:34', arr:'13:07', chTime:'10:27', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9218', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'11:34', arr:'15:07', chTime:'12:27', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9222', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'13:34', arr:'17:07', chTime:'14:27', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9226', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'15:34', arr:'19:07', chTime:'16:27', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9234', from:'Zürich HB', to:'Paris Gare de Lyon', dep:'18:34', arr:'22:07', chTime:'19:27', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+
+  // TGV Inbound Paris→Zürich
+  {id:'TGV 9203', from:'Paris Gare de Lyon', to:'Zürich HB', dep:'07:05', arr:'11:26', chTime:'10:06', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9211', from:'Paris Gare de Lyon', to:'Zürich HB', dep:'10:05', arr:'14:26', chTime:'13:05', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9213', from:'Paris Gare de Lyon', to:'Zürich HB', dep:'12:05', arr:'16:26', chTime:'15:05', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9219', from:'Paris Gare de Lyon', to:'Zürich HB', dep:'16:05', arr:'20:26', chTime:'19:06', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+  {id:'TGV 9223', from:'Paris Gare de Lyon', to:'Zürich HB', dep:'18:05', arr:'22:26', chTime:'21:06', chStation:'Basel SBB', type:'TGV', region:'nord', operator:'Lyria'},
+
+  // Nightjet via Basel
+  {id:'NJ 470',  from:'Zürich HB',          to:'Amsterdam Centraal', dep:'20:59', arr:'08:49', chTime:'22:16', chStation:'Basel Bad Bf', type:'NJ', region:'nord', operator:'ÖBB Nightjet'},
+  {id:'NJ 402',  from:'Zürich HB',          to:'Berlin Hbf',         dep:'21:59', arr:'09:03', chTime:'23:16', chStation:'Basel Bad Bf', type:'NJ', region:'nord', operator:'ÖBB Nightjet'},
+  {id:'NJ 403',  from:'Amsterdam Centraal', to:'Zürich HB',          dep:'20:45', arr:'09:05', chTime:'06:14', chStation:'Basel Bad Bf', type:'NJ', region:'nord', operator:'ÖBB Nightjet'},
+  {id:'NJ 471',  from:'Berlin Hbf',         to:'Zürich HB',          dep:'22:03', arr:'10:05', chTime:'08:14', chStation:'Basel Bad Bf', type:'NJ', region:'nord', operator:'ÖBB Nightjet'},
+
+  // ── REGION OST: Via Schaffhausen (IC Zürich↔Stuttgart) ──────────────────
+
+  {id:'IC 284', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'06:37', arr:'09:03', chTime:'07:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 282', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'08:37', arr:'11:03', chTime:'09:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 280', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'10:37', arr:'13:03', chTime:'11:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 182', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'12:37', arr:'15:03', chTime:'13:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 286', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'14:37', arr:'17:03', chTime:'15:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 188', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'16:37', arr:'19:03', chTime:'17:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 186', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'18:37', arr:'21:03', chTime:'19:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 180', from:'Zürich HB',      to:'Stuttgart Hbf', dep:'20:37', arr:'23:03', chTime:'21:21', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 181', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'07:57', arr:'10:23', chTime:'08:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 183', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'09:57', arr:'12:23', chTime:'10:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 187', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'11:57', arr:'14:23', chTime:'12:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 185', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'13:57', arr:'16:23', chTime:'14:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 189', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'15:57', arr:'18:23', chTime:'16:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 285', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'17:57', arr:'20:23', chTime:'18:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 283', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'19:57', arr:'22:23', chTime:'20:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+  {id:'IC 383', from:'Stuttgart Hbf',  to:'Zürich HB',     dep:'21:57', arr:'00:23', chTime:'22:37', chStation:'Schaffhausen', type:'IC', region:'ost', operator:'SBB/DB'},
+
+  // ── REGION OST: Via St. Margrethen (EC Zürich↔München) ──────────────────
+
+  {id:'EC 95',  from:'Zürich HB',   to:'München Hbf', dep:'05:35', arr:'08:50', chTime:'06:55', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 97',  from:'Zürich HB',   to:'München Hbf', dep:'07:32', arr:'10:50', chTime:'08:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 99',  from:'Zürich HB',   to:'München Hbf', dep:'09:32', arr:'12:50', chTime:'10:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 191', from:'Zürich HB',   to:'München Hbf', dep:'11:32', arr:'14:50', chTime:'12:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 193', from:'Zürich HB',   to:'München Hbf', dep:'13:32', arr:'16:50', chTime:'14:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 195', from:'Zürich HB',   to:'München Hbf', dep:'15:32', arr:'18:50', chTime:'16:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 197', from:'Zürich HB',   to:'München Hbf', dep:'17:32', arr:'20:50', chTime:'18:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 199', from:'Zürich HB',   to:'München Hbf', dep:'19:32', arr:'22:50', chTime:'20:52', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+
+  // Confirmed by user: this working actually starts at Lindau-Reutin, not
+  // München Hbf (the EC only runs Lindau-Reutin–Zürich; the München–Lindau
+  // leg is a separate connecting service). Live board is authoritative.
+  {id:'EC 290', from:'Lindau-Reutin', to:'Zürich HB',   dep:'06:10', arr:'08:28', chTime:'07:08', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 198', from:'München Hbf', to:'Zürich HB',   dep:'07:10', arr:'09:23', chTime:'08:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 196', from:'München Hbf', to:'Zürich HB',   dep:'09:10', arr:'11:28', chTime:'10:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 194', from:'München Hbf', to:'Zürich HB',   dep:'11:10', arr:'13:28', chTime:'12:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 192', from:'München Hbf', to:'Zürich HB',   dep:'13:10', arr:'15:28', chTime:'14:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 190', from:'München Hbf', to:'Zürich HB',   dep:'15:10', arr:'17:28', chTime:'16:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 96',  from:'München Hbf', to:'Zürich HB',   dep:'17:10', arr:'19:28', chTime:'18:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 98',  from:'München Hbf', to:'Zürich HB',   dep:'19:10', arr:'21:28', chTime:'20:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+
+  // Nightjet via St. Margrethen
+  {id:'NJ 13487',from:'Zürich HB', to:'Wien Hbf',    dep:'20:40', arr:'08:30', chTime:'22:34', chStation:'St. Margrethen', type:'NJ', region:'ost', operator:'ÖBB Nightjet'},
+  {id:'NJ 13486',from:'Wien Hbf',  to:'Zürich HB',   dep:'20:50', arr:'11:36', chTime:'06:55', chStation:'St. Margrethen', type:'NJ', region:'ost', operator:'ÖBB Nightjet'},
+
+  // ── REGION OST: Via Buchs SG (RailJet Zürich↔Wien) ──────────────────────
+
+  {id:'RJX 161', from:'Zürich HB', to:'Wien Hbf', dep:'06:40', arr:'14:28', chTime:'07:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 163', from:'Zürich HB', to:'Wien Hbf', dep:'08:40', arr:'16:28', chTime:'09:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 165', from:'Zürich HB', to:'Wien Hbf', dep:'10:40', arr:'18:28', chTime:'11:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 167', from:'Zürich HB', to:'Wien Hbf', dep:'12:40', arr:'20:28', chTime:'13:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 169', from:'Zürich HB', to:'Wien Hbf', dep:'14:40', arr:'22:28', chTime:'15:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 171', from:'Zürich HB', to:'Wien Hbf', dep:'16:40', arr:'00:28', chTime:'17:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 369', from:'Zürich HB', to:'Wien Hbf', dep:'18:40', arr:'02:28', chTime:'19:55', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+
+  {id:'RJX 364', from:'Wien Hbf', to:'Zürich HB', dep:'05:00', arr:'12:20', chTime:'07:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 366', from:'Wien Hbf', to:'Zürich HB', dep:'06:32', arr:'15:20', chTime:'09:15', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 368', from:'Wien Hbf', to:'Zürich HB', dep:'08:32', arr:'13:20', chTime:'11:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 160', from:'Wien Hbf', to:'Zürich HB', dep:'10:32', arr:'15:20', chTime:'13:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 162', from:'Wien Hbf', to:'Zürich HB', dep:'12:32', arr:'17:20', chTime:'15:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 164', from:'Wien Hbf', to:'Zürich HB', dep:'14:32', arr:'19:20', chTime:'17:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 166', from:'Wien Hbf', to:'Zürich HB', dep:'16:32', arr:'21:20', chTime:'19:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+  {id:'RJX 168', from:'Wien Hbf', to:'Zürich HB', dep:'18:32', arr:'23:47', chTime:'21:47', chStation:'Buchs SG', type:'RJX', region:'ost', operator:'ÖBB/SBB'},
+
+  // Nightjet via Buchs SG
+  {id:'NJ 465',  from:'Zürich HB', to:'Wien Hbf',  dep:'20:40', arr:'07:45', chTime:'22:16', chStation:'Buchs SG', type:'NJ', region:'ost', operator:'ÖBB Nightjet'},
+  {id:'NJ 466',  from:'Wien Hbf',  to:'Zürich HB', dep:'20:22', arr:'08:20', chTime:'06:40', chStation:'Buchs SG', type:'NJ', region:'ost', operator:'ÖBB Nightjet'},
+
+  // ── REGION OST: Via Chiasso (EC Gotthard Zürich↔Milano) ─────────────────
+
+  {id:'EC 11',  from:'Zürich HB',       to:'Milano Centrale', dep:'06:33', arr:'10:00', chTime:'09:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 13',  from:'Zürich HB',       to:'Milano Centrale', dep:'07:33', arr:'11:00', chTime:'10:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 15',  from:'Zürich HB',       to:'Milano Centrale', dep:'09:33', arr:'13:00', chTime:'12:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 17',  from:'Zürich HB',       to:'Milano Centrale', dep:'11:33', arr:'15:00', chTime:'14:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 19',  from:'Zürich HB',       to:'Milano Centrale', dep:'12:33', arr:'16:00', chTime:'15:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 21',  from:'Zürich HB',       to:'Milano Centrale', dep:'13:33', arr:'17:00', chTime:'16:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 23',  from:'Zürich HB',       to:'Milano Centrale', dep:'15:33', arr:'19:00', chTime:'18:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 25',  from:'Zürich HB',       to:'Milano Centrale', dep:'17:33', arr:'21:00', chTime:'20:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 27',  from:'Zürich HB',       to:'Milano Centrale', dep:'18:33', arr:'22:00', chTime:'21:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 29',  from:'Zürich HB',       to:'Milano Centrale', dep:'19:33', arr:'23:00', chTime:'22:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 151', from:'Basel SBB',       to:'Milano Centrale', dep:'10:47', arr:'15:08', chTime:'14:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 153', from:'Basel SBB',       to:'Milano Centrale', dep:'14:47', arr:'19:08', chTime:'18:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+
+  {id:'EC 10',  from:'Milano Centrale', to:'Zürich HB',       dep:'06:00', arr:'10:27', chTime:'08:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 12',  from:'Milano Centrale', to:'Zürich HB',       dep:'07:00', arr:'11:27', chTime:'09:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 14',  from:'Milano Centrale', to:'Zürich HB',       dep:'09:00', arr:'12:27', chTime:'10:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 16',  from:'Milano Centrale', to:'Zürich HB',       dep:'10:00', arr:'13:27', chTime:'11:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 18',  from:'Milano Centrale', to:'Zürich HB',       dep:'12:00', arr:'15:27', chTime:'13:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 30',  from:'Milano Centrale', to:'Zürich HB',       dep:'11:00', arr:'15:27', chTime:'14:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 20',  from:'Milano Centrale', to:'Zürich HB',       dep:'13:00', arr:'18:27', chTime:'16:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 22',  from:'Milano Centrale', to:'Zürich HB',       dep:'15:00', arr:'19:27', chTime:'17:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 24',  from:'Milano Centrale', to:'Zürich HB',       dep:'16:00', arr:'20:27', chTime:'17:51', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 28',  from:'Milano Centrale', to:'Zürich HB',       dep:'19:00', arr:'23:27', chTime:'21:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 150', from:'Milano Centrale', to:'Basel SBB',        dep:'07:00', arr:'11:12', chTime:'09:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 152', from:'Milano Centrale', to:'Basel SBB',        dep:'11:00', arr:'15:12', chTime:'13:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+
+  // ── REGION WEST: Via Domodossola (EC Simplon Basel/Genève↔Milano) ────────
+
+  {id:'EC 41',  from:'Genève',         to:'Milano Centrale', dep:'05:27', arr:'09:35', chTime:'08:10', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 143', from:'Genève',         to:'Milano Centrale', dep:'07:27', arr:'11:35', chTime:'10:10', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 45',  from:'Genève',         to:'Milano Centrale', dep:'13:27', arr:'17:35', chTime:'16:10', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 47',  from:'Genève',         to:'Milano Centrale', dep:'18:27', arr:'22:35', chTime:'21:10', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+
+  {id:'EC 40',  from:'Milano Centrale',to:'Genève',          dep:'06:25', arr:'12:31', chTime:'09:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 142', from:'Milano Centrale',to:'Genève',          dep:'10:25', arr:'17:31', chTime:'14:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 44',  from:'Milano Centrale',to:'Genève',          dep:'14:25', arr:'18:31', chTime:'16:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 46',  from:'Milano Centrale',to:'Genève',          dep:'18:25', arr:'00:07', chTime:'20:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+
+  {id:'EC 61',  from:'Basel SBB',      to:'Milano Centrale', dep:'06:30', arr:'13:35', chTime:'09:12', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 65',  from:'Basel SBB',      to:'Milano Centrale', dep:'12:30', arr:'19:35', chTime:'15:12', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 67',  from:'Basel SBB',      to:'Milano Centrale', dep:'17:30', arr:'23:35', chTime:'20:12', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+
+  {id:'EC 60',  from:'Milano Centrale',to:'Basel SBB',       dep:'06:25', arr:'11:29', chTime:'08:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 64',  from:'Milano Centrale',to:'Basel SBB',       dep:'14:25', arr:'19:29', chTime:'16:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+  {id:'EC 66',  from:'Milano Centrale',to:'Basel SBB',       dep:'17:25', arr:'22:37', chTime:'19:48', chStation:'Domodossola', type:'EC', region:'west', operator:'SBB/Trenitalia'},
+
+  // ── REGION WEST: Via Vallorbe (TGV Lyria Lausanne↔Paris) ─────────────────
+
+  {id:'TGV 9264',from:'Lausanne',            to:'Paris Gare de Lyon', dep:'07:19', arr:'10:55', chTime:'08:04', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9268',from:'Lausanne',            to:'Paris Gare de Lyon', dep:'12:19', arr:'15:55', chTime:'13:04', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9270',from:'Lausanne',            to:'Paris Gare de Lyon', dep:'16:19', arr:'19:55', chTime:'17:04', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+
+  {id:'TGV 9261',from:'Paris Gare de Lyon', to:'Lausanne',            dep:'07:05', arr:'10:39', chTime:'10:44', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9269',from:'Paris Gare de Lyon', to:'Lausanne',            dep:'12:05', arr:'14:45', chTime:'14:45', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9277',from:'Paris Gare de Lyon', to:'Lausanne',            dep:'18:05', arr:'20:44', chTime:'20:44', chStation:'Vallorbe', type:'TGV', region:'west', operator:'Lyria'},
+
+  // ── REGION WEST: Via Genève (TGV Lyria Genève↔Paris) ────────────────────
+
+  // Outbound Genève→Paris
+  {id:'TGV 9760',from:'Genève', to:'Paris Gare de Lyon', dep:'06:28', arr:'09:43', chTime:'06:58', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9764',from:'Genève', to:'Paris Gare de Lyon', dep:'08:21', arr:'11:43', chTime:'08:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9768',from:'Genève', to:'Paris Gare de Lyon', dep:'10:27', arr:'13:43', chTime:'10:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9770',from:'Genève', to:'Paris Gare de Lyon', dep:'12:27', arr:'15:43', chTime:'12:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9774',from:'Genève', to:'Paris Gare de Lyon', dep:'14:27', arr:'17:43', chTime:'14:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9776',from:'Genève', to:'Paris Gare de Lyon', dep:'16:27', arr:'19:43', chTime:'16:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9780',from:'Genève', to:'Paris Gare de Lyon', dep:'18:27', arr:'21:43', chTime:'18:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9784',from:'Genève', to:'Paris Gare de Lyon', dep:'20:27', arr:'23:43', chTime:'20:57', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+
+  // Inbound Paris→Genève
+  {id:'TGV 9761',from:'Paris Gare de Lyon', to:'Genève', dep:'07:05', arr:'10:29', chTime:'09:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9763',from:'Paris Gare de Lyon', to:'Genève', dep:'09:05', arr:'12:29', chTime:'11:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9765',from:'Paris Gare de Lyon', to:'Genève', dep:'11:05', arr:'14:29', chTime:'13:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9773',from:'Paris Gare de Lyon', to:'Genève', dep:'13:05', arr:'16:29', chTime:'15:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9775',from:'Paris Gare de Lyon', to:'Genève', dep:'15:05', arr:'18:29', chTime:'17:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9777',from:'Paris Gare de Lyon', to:'Genève', dep:'17:05', arr:'20:29', chTime:'19:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9781',from:'Paris Gare de Lyon', to:'Genève', dep:'19:05', arr:'22:29', chTime:'21:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+  {id:'TGV 9789',from:'Paris Gare de Lyon', to:'Genève', dep:'21:05', arr:'00:29', chTime:'23:02', chStation:'Genève', type:'TGV', region:'west', operator:'Lyria'},
+];
+
+// Stamp each train with an internal index and default live values.
+// _schedMin freezes the curated scheduled time so later live polls can
+// verify a candidate match is actually the same physical journey (see
+// circDiff usage in pollOpendata) rather than a reused train number.
+// delayKnown starts false: opendata.ch only reports a real delay figure once
+// a train is close enough to "go live" (typically within ~2h of its stop).
+// Rendering that as "+0 Min/Pünktlich" before any live reading has arrived
+// looked identical to a confirmed on-time train — indistinguishable from
+// "delays aren't working". delayKnown lets the UI show "–/Unbekannt" until
+// opendata.ch actually confirms a value.
+const TRAINS = BASE_TRAINS.map((t, i) => ({...t, delay:0, status:'on-time', delayKnown:false, liveSeen:false, _id:i, _schedMin: toMin(t.chTime)}));
+let pollsCompleted = 0; // guards isStaleCurated from hiding everything before opendata.ch has had a first chance to confirm anything
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+const state = {
+  filtered: [],
+  selectedId: null,
+  filters: {status:'all', trainType:'all', region:'all', station:'all', timeHorizon:2},
+  search: '',
+  sortBy: 'chTime',
+  sortDir: 1,
+  // selectedId doubles as "which train's Zuglauf panel is open" — see
+  // toggleZuglaufPanel.
+};
+
+// ─── TIME HELPERS ─────────────────────────────────────────────────────────────
+function toMin(t) {
+  if (!t) return 0;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+function nowMin() {
+  const n = new Date();
+  return n.getHours() * 60 + n.getMinutes();
+}
+function effChMin(train) {
+  return toMin(train.chTime) + (train.delay || 0);
+}
+// How long a departed train stays visible after its effective (scheduled +
+// delay) departure time, before it drops off the list entirely.
+const PAST_GRACE_MIN = 30;
+// Resolve a train's effective time to the single most plausible occurrence
+// relative to "now", trying yesterday/today/tomorrow's slot and picking
+// whichever is closest. Replaces a previous one-directional "wrap if more
+// than 2h in the past" rule, which could resurrect a train from many hours
+// ago as if it were "tomorrow" whenever the horizon was long enough — e.g.
+// still showing a train that departed at 05:16 this morning. With the
+// closest-occurrence approach, a slot 13h in the past only reappears if
+// it's genuinely tomorrow's nearest occurrence AND that still falls inside
+// the chosen horizon; a slot a few hours in the past just stays in the past.
+function resolveEff(train, now) {
+  const raw = ((effChMin(train) % 1440) + 1440) % 1440;
+  let best = raw, bestDist = Infinity;
+  for (const cand of [raw - 1440, raw, raw + 1440]) {
+    const dist = Math.abs(cand - now);
+    if (dist < bestDist) { bestDist = dist; best = cand; }
+  }
+  return best;
+}
+function inWindow(train) {
+  const now = nowMin();
+  const hz = state.filters.timeHorizon * 60;
+  const eff = resolveEff(train, now);
+  return eff >= now - PAST_GRACE_MIN && eff <= now + hz;
+}
+function minToHHMM(m) {
+  const total = ((m % 1440) + 1440) % 1440;
+  return String(Math.floor(total / 60)).padStart(2,'0') + ':' + String(total % 60).padStart(2,'0');
+}
+function fmtDelay(min, known) {
+  if (!known) return '–';
+  if (min === 0) return '+0 Min';
+  return (min > 0 ? '+' : '') + min + ' Min';
+}
+// Shortest distance in minutes between two clock times on a 24h circle.
+function circDiff(a, b) {
+  const d = Math.abs(a - b) % 1440;
+  return d > 720 ? 1440 - d : d;
+}
+
+// ─── FILTER + SORT + RENDER ───────────────────────────────────────────────────
+// A curated (BASE_TRAINS) row is a hand-entered guess at a schedule slot —
+// it can simply be wrong (renumbered line, construction-era reroute, a
+// number that today runs a completely different short local hop instead of
+// the usual through-service). Once opendata.ch's live board has had a
+// chance to confirm a curated row (liveSeen, set in pollOpendata whenever
+// ANY live entry matches it — even with delay still unknown), an
+// unconfirmed row whose scheduled time has already arrived is more likely
+// stale/wrong curated data than a currently-live train opendata.ch simply
+// hasn't reported on yet, so it's hidden rather than shown with a guessed
+// (possibly wrong) route. Dynamic entries, always built straight from the
+// live board, are never subject to this.
+const LIVE_CONFIRM_LEAD_MIN = 30;
+function isStaleCurated(t) {
+  if (t._id >= 100000 || t.liveSeen || !pollsCompleted) return false;
+  const now = nowMin();
+  return resolveEff(t, now) <= now + LIVE_CONFIRM_LEAD_MIN;
+}
+function applyFilters() {
+  let list = TRAINS.filter(t => {
+    if (!inWindow(t)) return false;
+    if (isStaleCurated(t)) return false;
+    if (t._hiddenDuplicate) return false;
+    if (state.filters.status !== 'all' && t.status !== state.filters.status) return false;
+    if (state.filters.trainType !== 'all' && t.type !== state.filters.trainType) return false;
+    if (state.filters.region !== 'all' && t.region !== state.filters.region) return false;
+    if (state.filters.station !== 'all' && t.chStation !== state.filters.station) return false;
+    if (state.search) {
+      const q = state.search.toLowerCase();
+      if (![t.id, t.from, t.to, t.chStation].some(s => s.toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  list.sort((a, b) => {
+    let va, vb;
+    if (state.sortBy === 'delay')  { va = a.delay; vb = b.delay; }
+    else if (state.sortBy === 'to')    { va = a.to; vb = b.to; }
+    else if (state.sortBy === 'from')  { va = a.from; vb = b.from; }
+    else { va = resolveEff(a, nowMin()); vb = resolveEff(b, nowMin()); }
+    if (va < vb) return -state.sortDir;
+    if (va > vb) return  state.sortDir;
+    return 0;
+  });
+
+  state.filtered = list;
+  renderTable();
+  renderKPIs();
+}
+
+function renderKPIs() {
+  const a = state.filtered;
+  // Only delayKnown trains have a confirmed status — counting the
+  // not-yet-confirmed majority (default status 'on-time') as "Pünktlich"
+  // overstated punctuality and hid how little was actually confirmed.
+  const confirmed = a.filter(t => t.delayKnown);
+  const unknown = a.length - confirmed.length;
+  const ontime = confirmed.filter(t => t.status === 'on-time').length;
+  const delayed = confirmed.filter(t => t.status === 'delayed').length;
+  const cancelled = confirmed.filter(t => t.status === 'cancelled').length;
+  const withDelay = confirmed.filter(t => t.delay > 0);
+  const avg = withDelay.length ? Math.round(withDelay.reduce((s,t)=>s+t.delay,0)/withDelay.length) : 0;
+  document.getElementById('kpi-total').textContent    = a.length;
+  document.getElementById('kpi-ontime').textContent   = ontime;
+  document.getElementById('kpi-delayed').textContent  = delayed;
+  document.getElementById('kpi-cancelled').textContent= cancelled;
+  document.getElementById('kpi-unknown').textContent  = unknown;
+  document.getElementById('kpi-avgdelay').textContent = avg ? '+'+avg+' Min' : '–';
+  document.getElementById('result-count').textContent = `${a.length} Züge im Fenster +${state.filters.timeHorizon}h`;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('train-tbody');
+  const empty = document.getElementById('empty-state');
+  if (!state.filtered.length) { tbody.innerHTML=''; empty.style.display=''; return; }
+  empty.style.display = 'none';
+
+  const now = nowMin();
+  // "Jetzt"-marker only makes sense when the table is actually in
+  // chronological order — skip it when sorted by delay/from/to.
+  const chronological = state.sortBy === 'chTime' && state.sortDir === 1;
+  const nowIdx = chronological ? state.filtered.findIndex(t => resolveEff(t, now) >= now) : -1;
+
+  const rowsHtml = state.filtered.map(t => {
+    const dc = !t.delayKnown ? '' : t.delay === 0 ? 'delay-0' : t.delay <= 5 ? 'delay-low' : 'delay-high';
+    const si = statusInfo(t);
+    const effStr = t.delayKnown && t.delay ? ` <span style="color:var(--red);font-size:11px">→${minToHHMM(effChMin(t))}</span>` : '';
+    const sel = t._id === state.selectedId ? 'selected' : '';
+    const num = t.id.replace(/^\S+\s/,'');
+    const zLabel = state.selectedId === t._id ? 'Zuglauf schliessen' : 'Zuglauf öffnen';
+    return `<tr class="${sel}" data-id="${t._id}">
+      <td class="td-train">
+        <span class="type-badge badge-${t.type}">${t.type}</span> <span>${num}</span>
+        <div class="zuglauf-toggle" data-zuglauf-id="${t._id}">${zLabel}</div>
+      </td>
+      <td>${t.from}</td>
+      <td>${t.to}</td>
+      <td class="td-station">${t.chStation}</td>
+      <td class="td-time">${t.chTime}${effStr}</td>
+      <td><span class="status-badge ${si.cls}">${si.label}</span></td>
+      <td class="td-delay ${dc}">${t.status === 'cancelled' ? '' : fmtDelay(t.delay, t.delayKnown)}</td>
+    </tr>`;
+  });
+
+  // Only insert the divider at an actual boundary between past and future
+  // rows — not above everything (all-future) or below everything (all-past).
+  if (nowIdx > 0 && nowIdx < rowsHtml.length) {
+    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · ${minToHHMM(now)}</span><span class="now-marker-line"></span></td></tr>`);
+  }
+
+  tbody.innerHTML = rowsHtml.join('');
+
+  tbody.querySelectorAll('tr[data-id]').forEach(row => {
+    row.addEventListener('click', () => toggleZuglaufPanel(parseInt(row.dataset.id)));
+  });
+  tbody.querySelectorAll('.zuglauf-toggle').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleZuglaufPanel(parseInt(el.dataset.zuglaufId));
+    });
+  });
+}
+
+// Distinguishes *why* a train's status isn't confirmed instead of a single
+// generic "Unbekannt": before its origin departure even happens there's
+// nothing to report yet, which reads very differently from "should have
+// live data by now but doesn't".
+function statusInfo(t) {
+  if (t.delayKnown) {
+    if (t.status === 'cancelled') {
+      // The confirmed segment is from this run's own recorded origin up to
+      // the border station where the cancellation was detected — that's
+      // exactly what t.from/t.chStation already record.
+      let label = `Ausfall: ${t.from} → ${t.chStation}`;
+      if (t.replacementId) {
+        const rep = TRAINS.find(r => r._id === t.replacementId);
+        if (rep) label += ` · Ersatzzug ${rep.id}`;
+      }
+      return {cls: 's-cancelled', label};
+    }
+    return {
+      cls: t.status==='on-time' ? 's-ontime' : t.delay<=5 ? 's-warning' : 's-delayed',
+      label: t.status==='on-time' ? 'Pünktlich' : t.delay<=5 ? 'Leichte Vsp.' : 'Verspätet',
+    };
+  }
+  const now = nowMin();
+  const depEff = t.dep ? resolveEff({chTime: t.dep, delay: 0}, now) : null;
+  if (depEff !== null && depEff > now) {
+    return {cls: 's-unknown', label: `Abfahrt ${t.dep} Uhr`};
+  }
+  return {cls: 's-unknown', label: 'Keine Daten vorhanden'};
+}
+
+// ─── ZUGLAUF (full stop-by-stop run, shown in the right-hand panel) ───────────
+function toggleZuglaufPanel(trainId) {
+  const t = TRAINS.find(tr => tr._id === trainId);
+  if (!t) return;
+  if (state.selectedId === trainId) {
+    state.selectedId = null;
+    closeDetail();
+    renderTable();
+    return;
+  }
+  state.selectedId = trainId;
+  document.getElementById('detail-panel').classList.add('open');
+  renderTable(); // updates row highlight + "Zuglauf schliessen" label
+  renderZuglaufPanel(t);
+}
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+function zuglaufPanelHeader(t) {
+  const num = t.id.replace(/^\S+\s/, '');
+  return `<div class="detail-train"><span class="type-badge badge-${t.type}">${t.type}</span> ${num}</div>
+    <div class="detail-route">${t.from} → ${t.to}</div>`;
+}
+
+async function renderZuglaufPanel(t) {
+  const content = document.getElementById('detail-content');
+  const header = zuglaufPanelHeader(t);
+  if (!t.tripId) {
+    content.innerHTML = header + `<div class="zuglauf-msg">Zuglauf nicht verfügbar (noch kein Live-Treffer für diesen Zug).</div>`;
+    return;
+  }
+  content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
+  const stops = await fetchZuglaufStops(t.tripId);
+  // The user may have selected a different train (or closed the panel)
+  // while this was in flight — don't clobber whatever's showing now.
+  if (state.selectedId !== t._id) return;
+  content.innerHTML = header + (stops ? buildZuglaufTable(stops) : `<div class="zuglauf-msg">Zuglauf konnte nicht geladen werden.</div>`);
+}
+
+// /api/v6/trip returns the static, schedule-only shape of a run — verified
+// its realTime is always false, even for a train whose delay we'd already
+// confirmed live minutes earlier via /stoptimes. So the static shape from
+// /trip is only used for stop names/order; the actual realtime figures are
+// re-fetched per stop from /stoptimes (which does carry them), matched back
+// by tripId. Stops already in the past (no longer on any board) simply
+// don't get a live match and are shown as schedule-only.
+async function fetchZuglaufStops(tripId) {
+  try {
+    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const leg = data.legs?.[0];
+    if (!leg) return null;
+    const staticStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
+    const liveRows = await Promise.all(staticStops.map(s => fetchStopLiveForTrip(s.stopId, tripId)));
+    return staticStops.map((s, i) => {
+      const live = liveRows[i];
+      if (live?.realTime && live.place) {
+        return {
+          name: s.name,
+          scheduledArrival: live.place.scheduledArrival || s.scheduledArrival,
+          scheduledDeparture: live.place.scheduledDeparture || s.scheduledDeparture,
+          arrival: live.place.arrival, departure: live.place.departure,
+          cancelled: !!live.place.cancelled,
+          liveConfirmed: true,
+        };
+      }
+      return {
+        name: s.name,
+        scheduledArrival: s.scheduledArrival, scheduledDeparture: s.scheduledDeparture,
+        arrival: null, departure: null,
+        cancelled: !!s.cancelled,
+        liveConfirmed: false,
+      };
+    });
+  } catch (e) { return null; }
+}
+async function fetchStopLiveForTrip(stopId, tripId) {
+  if (!stopId) return null;
+  try {
+    const params = new URLSearchParams({stopId, arriveBy: 'false', n: '80', window: String(20 * 3600), mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
+    const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.stopTimes || []).find(s => s.tripId === tripId) || null;
+  } catch (e) { return null; }
+}
+function buildZuglaufTable(stops) {
+  const rows = stops.map(s => {
+    const soll = s.scheduledDeparture || s.scheduledArrival;
+    const sollStr = hhmmZurich(soll) || '–';
+    if (!s.liveConfirmed) {
+      return `<tr><td>${s.name}</td><td class="td-time">${sollStr}</td><td class="td-time">–</td><td class="td-delay">–</td></tr>`;
+    }
+    const ist = s.departure || s.arrival;
+    const istStr = hhmmZurich(ist) || sollStr;
+    const delayMin = (soll && ist) ? Math.round((new Date(ist) - new Date(soll)) / 60000) : 0;
+    const dCls = s.cancelled ? 'delay-high' : delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
+    const dStr = s.cancelled ? 'Ausfall' : (delayMin === 0 ? '0 Min' : (delayMin > 0 ? '+' : '') + delayMin + ' Min');
+    return `<tr>
+      <td>${s.name}</td>
+      <td class="td-time">${sollStr}</td>
+      <td class="td-time ${dCls}">${istStr}</td>
+      <td class="td-delay ${dCls}">${dStr}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="zuglauf-table">
+    <thead><tr><th>Halt</th><th>Soll</th><th>Echtzeit</th><th>+/-</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ─── REALTIME: transitous.org (MOTIS v2) polling ─────────────────────────────
+// Static route/timetable data (BASE_TRAINS above) comes from open GTFS-style
+// sources; live delay/cancellation state is fetched here via transitous.org
+// for every border station. Any train whose category matches our known
+// international categories is surfaced — even if it isn't part of the
+// curated BASE_TRAINS list — so the dashboard shows *all* trains fulfilling
+// the selected category, not just the presets.
+const BORDER_STATIONS = [
+  {name:'Basel SBB',      region:'nord'},
+  {name:'Basel Bad Bf',   region:'nord'},
+  {name:'Schaffhausen',   region:'ost'},
+  {name:'St. Margrethen', region:'ost'},
+  {name:'Buchs SG',       region:'ost'},
+  {name:'Chiasso',        region:'ost'},
+  {name:'Domodossola',    region:'west'},
+  {name:'Genève',         region:'west'},
+  {name:'Vallorbe',       region:'west'},
+];
+// Maps a run's category letters (parsed from tripShortName/routeShortName)
+// to the badge types used in this dashboard.
+const CATEGORY_MAP = {ICE:'ICE', TGV:'TGV', EC:'EC', IC:'IC', RJ:'RJX', RJX:'RJX', NJ:'NJ', EN:'NJ', RE7:'RE7', TER:'TER'};
+
+// transitous.org watched long-distance/night-rail modes — excludes regional/
+// S-Bahn/suburban traffic so domestic short-hops never need to be fetched
+// (and filtered) in the first place.
+const RAIL_MODES = ['HIGHSPEED_RAIL', 'LONG_DISTANCE', 'NIGHT_RAIL'];
+
+let dynamicSeq = 100000; // _id space for trains discovered live (not in BASE_TRAINS)
+let opendataOK = false;  // kept as the connection-status flag name; now reflects transitous.org reachability
+
+function numKey(id) {
+  const m = String(id).match(/(\d+)/);
+  return m ? String(parseInt(m[1], 10)) : id;
+}
+// SBB reuses the Basel SBB / Basel Bad Bf pair under the same run/number —
+// once as the actual border crossing (Basel Bad Bf, DE↔CH), again a few
+// minutes later as the domestic continuation through Basel SBB. See
+// dedupeAliasedStations below.
+const CHSTATION_ALIASES = {'Basel SBB': 'Basel Bad Bf'};
+
+// transitous.org reports each stop's IANA timezone directly — far simpler
+// and more reliable than the old UIC-country-code-prefix guessing this
+// dashboard used against opendata.ch's plain station ids.
+const TZ_COUNTRY = {
+  'Europe/Zurich': 'CH', 'Europe/Berlin': 'DE', 'Europe/Paris': 'FR',
+  'Europe/Vienna': 'AT', 'Europe/Rome': 'IT', 'Europe/Vaduz': 'LI',
+  'Europe/Amsterdam': 'NL',
+};
+function placeCountry(place) {
+  if (!place?.tz) return '??';
+  return TZ_COUNTRY[place.tz] || place.tz.split('/').pop().toUpperCase().slice(0, 2);
+}
+function hhmmZurich(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'Europe/Zurich'});
+}
+// A low-frequency stop's board can force MOTIS's `n` (minimum result count)
+// past the requested `window`, reaching a whole extra calendar day ahead
+// (confirmed: a query at a quiet border station returned a trip actually
+// running two days later). This dashboard only tracks time-of-day (HH:MM),
+// so an entry like that silently got treated as "today, already confirmed"
+// — reject anything whose scheduled date isn't today before it touches any
+// train record.
+function isTodayZurich(iso) {
+  if (!iso) return false;
+  const fmt = d => d.toLocaleDateString('en-CA', {timeZone:'Europe/Zurich'});
+  return fmt(new Date(iso)) === fmt(new Date());
+}
+
+// Basel SBB and Basel Bad Bf are 5 minutes apart, and both are watched
+// border stations (Bad Bf for German ICE/NJ traffic, SBB for French TGV
+// traffic). The same ICE run genuinely appears on both boards: once as it
+// actually crosses the border at Basel Bad Bf, and again a few minutes
+// later as it continues on domestically through Basel SBB. That's true
+// whether the Basel Bad Bf side is a curated BASE_TRAINS row or itself a
+// live-discovered one, and the two stops' times can be far enough apart
+// (~5-25 min) to exceed the ±15 min same-run matching tolerance used
+// elsewhere — so they end up as two separate rows instead of one, the
+// "ICE 109 listed twice" bug. Run this after every poll to merge them back
+// down: keep the entry at the true crossing station (CHSTATION_ALIASES'
+// value) and hide the domestic-continuation duplicate.
+function dedupeAliasedStations() {
+  const byKey = new Map(); // "type|number" -> [train, ...]
+  TRAINS.forEach(t => {
+    const key = t.type + '|' + numKey(t.id);
+    (byKey.get(key) || byKey.set(key, []).get(key)).push(t);
+  });
+  byKey.forEach(list => {
+    if (list.length < 2) return;
+    list.forEach(t => {
+      const primaryStation = CHSTATION_ALIASES[t.chStation];
+      t._hiddenDuplicate = !!(primaryStation && list.some(o => o !== t && o.chStation === primaryStation));
+    });
+  });
+}
+
+// A route's real border crossing can be a station far down its line from
+// where it also happens to make a domestic stop at one of our OTHER
+// watched hubs (e.g. EC 65 Basel SBB→Milano Centrale genuinely crosses at
+// Domodossola — already the curated row — but also legitimately calls at
+// Basel SBB as a plain domestic stop, which on its own passes the
+// international-run filter and gets discovered as a spurious second
+// "crossing"). A curated row is our authoritative record of a route's real
+// crossing station, so any dynamic discovery sharing the same type+number
+// is that same physical service surfacing at a non-primary stop — fold any
+// live confirmation it carries into the curated row (it may be more
+// current) and hide the duplicate, rather than leave both visible under
+// different times/stations.
+function dedupeCuratedVsDynamic() {
+  const curatedByKey = new Map(); // "type|number" -> curated train
+  TRAINS.forEach(t => { if (t._id < 100000) curatedByKey.set(t.type + '|' + numKey(t.id), t); });
+  TRAINS.forEach(t => {
+    if (t._id < 100000 || t._hiddenDuplicate) return;
+    const curated = curatedByKey.get(t.type + '|' + numKey(t.id));
+    if (!curated) return;
+    if (t.delayKnown && !curated.delayKnown) {
+      curated.delay = t.delay; curated.status = t.status; curated.delayKnown = true;
+      curated.liveSeen = true; curated.tripId = t.tripId;
+    }
+    t._hiddenDuplicate = true;
+  });
+}
+
+// Beyond the specific Basel Bad Bf/SBB alias pair above, the same physical
+// run can still surface as multiple near-identical rows — e.g.
+// transitous.org serving overlapping rows for the same trip from different
+// underlying feeds (confirmed for RE7/TER even after the numKey
+// normalization in classifyEntry). Collapse anything sharing
+// type+number+scheduled time down to one row, keeping whichever copy
+// carries the most information.
+function dedupeSameRunDuplicates() {
+  const byKey = new Map(); // "type|number|chTime" -> [train, ...]
+  TRAINS.forEach(t => {
+    if (t._hiddenDuplicate) return; // already resolved by dedupeAliasedStations
+    const key = t.type + '|' + numKey(t.id) + '|' + t.chTime;
+    (byKey.get(key) || byKey.set(key, []).get(key)).push(t);
+  });
+  byKey.forEach(list => {
+    if (list.length < 2) return;
+    const keep = list.find(t => t.delayKnown) || list.find(t => t.tripId) || list[0];
+    list.forEach(t => { if (t !== keep) t._hiddenDuplicate = true; });
+  });
+}
+
+// Swiss replacement services ("Ersatzzug") run under the cancelled train's
+// own number plus 70000 (the "Schattennummer" convention) — e.g. IC 188
+// cancelled -> replacement runs as 70188. Link the two whenever the
+// replacement is also one of the trains this dashboard already tracks.
+function linkReplacementTrains() {
+  TRAINS.forEach(t => {
+    if (t.status !== 'cancelled' || t._hiddenDuplicate) { t.replacementId = null; return; }
+    const shadowNumber = String(parseInt(numKey(t.id), 10) + 70000);
+    const rep = TRAINS.find(o => o !== t && o.type === t.type && !o._hiddenDuplicate && numKey(o.id) === shadowNumber);
+    t.replacementId = rep ? rep._id : null;
+  });
+}
+
+// Resolve each border station name to a transitous.org stopId once at boot
+// via its geocoder. Importance alone isn't a safe ranking signal here — for
+// "Basel Bad Bf" the geocoder's top CH-country hit by importance is
+// actually the (unrelated, higher-traffic) "Basel SBB" a few hundred
+// metres away, not "Basel Bad Bf" itself. Name-match must be checked first;
+// importance is only the tiebreaker among equally-good name matches.
+// Domodossola (in Italy) is the one legitimate no-CH-match exception.
+async function geocodeStation(name) {
+  const res = await fetch('https://api.transitous.org/api/v1/geocode?text=' + encodeURIComponent(name) + '&numResults=8');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const list = await res.json();
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const target = norm(name);
+  const stops = (list || []).filter(x => x.type === 'STOP');
+  // Tiered so "Domodossola" prefers "Domodossola (I)" / plain "DOMODOSSOLA"
+  // over an importance-heavier but wrong "Milano Domodossola" (a Milan
+  // metro stop whose name merely contains "Domodossola" as a suffix).
+  const exact = stops.filter(x => norm(x.name) === target);
+  const prefixed = stops.filter(x => norm(x.name).startsWith(target));
+  const loose = stops.filter(x => norm(x.name).includes(target) || target.includes(norm(x.name)));
+  const pool = exact.length ? exact : prefixed.length ? prefixed : loose.length ? loose : stops;
+  const chPool = pool.filter(x => x.country === 'CH');
+  const pick = (chPool.length ? chPool : pool).sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+  return pick?.id || null;
+}
+// Domodossola's geocode results are genuinely ambiguous — a same-named but
+// unrelated "Milano Domodossola" metro stop and multiple differently-fed
+// "DOMODOSSOLA" entries all score close together by name/importance. Pin
+// it to the verified SBB-feed stop (the one whose data actually lines up
+// with our other Swiss-side border stations) rather than risk resolving to
+// the wrong one on a given run.
+const STATION_ID_OVERRIDES = {'Domodossola': 'ch-opentransportdataswiss26_Parent8301003'};
+let borderStopIdsReady = false;
+async function resolveBorderStopIds() {
+  await Promise.all(BORDER_STATIONS.map(async st => {
+    if (STATION_ID_OVERRIDES[st.name]) { st.stopId = STATION_ID_OVERRIDES[st.name]; return; }
+    try { st.stopId = await geocodeStation(st.name); } catch (e) { st.stopId = null; }
+  }));
+  borderStopIdsReady = true;
+}
+
+// The `mode` filter MUST be one comma-joined value ("A,B,C") — repeating
+// `mode=` as separate params (the natural URLSearchParams.append reading of
+// the OpenAPI array-param spec) silently returns zero results at lower-
+// traffic stations (verified: 0 results at St. Margrethen/Chiasso/
+// Domodossola with repeated params, dozens with the comma-joined form).
+// This was the main reason EC/RJX/TGV trains at those stations appeared to
+// have "no data" at all.
+async function fetchStopTimes(stopId, extraModes) {
+  const modes = (extraModes || RAIL_MODES).join(',');
+  const params = new URLSearchParams({stopId, arriveBy: 'false', n: '120', window: String(13 * 3600), mode: modes});
+  const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params.toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  return data.stopTimes || [];
+}
+
+// A run's category+number can show up as "ICE 101" in tripShortName, or as
+// a bare number ("9218") with the category only in routeShortName (seen for
+// TGV) — handle both.
+function classifyEntry(e) {
+  const tsn = (e.tripShortName || '').trim();
+  const m = tsn.match(/^([A-Za-z]+)\s*(\d+)$/);
+  if (m) {
+    const cat = CATEGORY_MAP[m[1].toUpperCase()];
+    // numKey strips leading zeros (e.g. RE7's "005332" -> "5332") — without
+    // it, the same physical run reported by two different feeds under
+    // differently-zero-padded numbers gets a different dynKey each time and
+    // is created twice, and the padded form leaks into the displayed id.
+    // "0" itself is a placeholder/malformed number seen occasionally in the
+    // source feed, never a real train number — reject it.
+    if (cat && numKey(m[2]) !== '0') return {type: cat, number: numKey(m[2])};
+  }
+  const rsn = (e.routeShortName || '').toUpperCase();
+  if (CATEGORY_MAP[rsn] && /^\d+$/.test(tsn) && numKey(tsn) !== '0') return {type: CATEGORY_MAP[rsn], number: numKey(tsn)};
+  return null;
+}
+
+// Stations/categories where transitous.org's realtime coverage is thin —
+// see the comment at the call site in pollOpendata.
+const FALLBACK_STATIONS = ['Chiasso', 'Domodossola', 'Buchs SG', 'St. Margrethen'];
+async function fetchOpendataFallbackBoard(stationName) {
+  const url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  return data.stationboard || [];
+}
+async function enrichFromOpendataFallback() {
+  const results = await Promise.all(FALLBACK_STATIONS.map(name => fetchOpendataFallbackBoard(name).catch(() => [])));
+  results.forEach(rows => rows.forEach(entry => {
+    const type = CATEGORY_MAP[entry.category];
+    if (!type) return;
+    const scheduledIso = entry.stop?.departure || entry.stop?.arrival;
+    if (!scheduledIso || !isTodayZurich(scheduledIso)) return;
+    const chTime = hhmmZurich(scheduledIso);
+    const nk = numKey(entry.number);
+    const train = TRAINS.find(t => t.type === type && numKey(t.id) === nk
+      && circDiff(toMin(chTime), t._schedMin) <= 15);
+    if (!train || train.delayKnown) return; // only fill a genuine gap, never override transitous's own data
+    if (typeof entry.stop?.delay !== 'number') return;
+    train.delay = entry.stop.delay;
+    train.status = entry.stop.delay > 5 ? 'delayed' : 'on-time';
+    train.delayKnown = true;
+    train.liveSeen = true;
+  }));
+}
+
+// tripId -> {from, to} once resolved via /api/v6/trip, or null while a
+// fetch for that tripId is in flight/failed (guards against re-fetching the
+// same trip every poll — the real endpoints don't change during the day).
+const tripEndpointCache = new Map();
+async function resolveTripEndpoints(t) {
+  tripEndpointCache.set(t.tripId, null);
+  try {
+    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(t.tripId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const legs = data.legs || [];
+    if (!legs.length) return;
+    const trueFrom = legs[0].from?.name;
+    const trueTo = legs[legs.length - 1].to?.name;
+    // German hub stations sometimes resolve to a specific platform level
+    // ("Hauptbahnhof (oben/unten/tief)") rather than the real distant
+    // terminus — a real intercity endpoint never carries that qualifier, so
+    // treat it as a bad resolution and keep the existing from/to instead.
+    const looksLikeLocalPlatform = s => /\((oben|unten|tief)\)/i.test(s || '');
+    if (!trueFrom || !trueTo || trueFrom === trueTo
+      || looksLikeLocalPlatform(trueFrom) || looksLikeLocalPlatform(trueTo)) return;
+    tripEndpointCache.set(t.tripId, {from: trueFrom, to: trueTo});
+    // Re-find by _id: this train object may have been replaced by a later
+    // poll's dedup pass by the time this fetch resolves.
+    const live = TRAINS.find(x => x._id === t._id);
+    if (live && live.tripId === t.tripId) {
+      live.from = trueFrom; live.to = trueTo;
+      applyFilters();
+    }
+  } catch (e) { /* leave the stoptimes-derived from/to as-is */ }
+}
+
+async function pollOpendata() {
+  try {
+    if (!borderStopIdsReady) await resolveBorderStopIds();
+
+    const results = await Promise.all(
+      BORDER_STATIONS.filter(st => st.stopId).map(st =>
+        fetchStopTimes(st.stopId).then(rows => ({st, rows})).catch(() => ({st, rows: []}))
+      )
+    );
+
+    // RE7 (Basel SBB↔Germany) and TER (Basel SBB↔France) run under
+    // REGIONAL_RAIL, outside the main HIGHSPEED_RAIL/LONG_DISTANCE/
+    // NIGHT_RAIL fetch above — a separate, targeted query at Basel SBB
+    // only. classifyEntry (via CATEGORY_MAP) and the domestic-run filter
+    // below still apply, so this can't pull in unrelated domestic RE/S-Bahn
+    // traffic — only RE7/TER rows survive, and only the ones that actually
+    // cross the border.
+    const baselSBB = BORDER_STATIONS.find(s => s.name === 'Basel SBB');
+    if (baselSBB?.stopId) {
+      try {
+        const regionalRows = await fetchStopTimes(baselSBB.stopId, ['REGIONAL_RAIL']);
+        results.push({st: baselSBB, rows: regionalRows});
+      } catch (e) { /* optional — main poll still succeeds without it */ }
+    }
+
+    // Guards against creating a duplicate *dynamic* row for the same
+    // physical train within one poll. Curated trains are still updated from
+    // every matching row below.
+    const dynamicCreated = new Set();
+    let anyOk = false;
+
+    results.forEach(({st, rows}) => {
+      if (rows.length) anyOk = true;
+      rows.forEach(e => {
+        const cls = classifyEntry(e);
+        if (!cls) return; // not one of our watched categories
+
+        const scheduledIso = e.place?.scheduledArrival || e.place?.scheduledDeparture;
+        const actualIso = e.place?.arrival || e.place?.departure;
+        if (!isTodayZurich(scheduledIso)) return; // reject wrong-calendar-day matches (see isTodayZurich)
+        const chTime = hhmmZurich(scheduledIso);
+        if (!chTime) return;
+
+        const cancelled = !!(e.cancelled || e.tripCancelled || e.place?.cancelled);
+        const hasLiveDelay = e.realTime === true;
+        const delayMin = (hasLiveDelay && scheduledIso && actualIso)
+          ? Math.round((new Date(actualIso) - new Date(scheduledIso)) / 60000) : 0;
+        const delayKnown = hasLiveDelay || cancelled;
+        const status = cancelled ? 'cancelled' : (delayMin > 5 ? 'delayed' : 'on-time');
+
+        const nk = cls.number;
+        // SBB reuses train numbers for unrelated (often domestic) runs later
+        // the same day. Matching on number+category alone would then let a
+        // late-evening reuse silently overwrite an international train's
+        // correct schedule/delay with the wrong run's data, so require the
+        // scheduled time to be close to the curated schedule too.
+        let train = TRAINS.find(t => t.type === cls.type && numKey(t.id) === nk
+          && circDiff(toMin(chTime), t._schedMin) <= 15);
+
+        if (train) {
+          // Any live match at all — even before delay is known — confirms
+          // this curated schedule slot genuinely exists on today's live
+          // board under this number, as opposed to being stale/wrong
+          // curated data (see isStaleCurated).
+          train.liveSeen = true;
+          if (delayKnown) { train.delay = delayMin; train.status = status; train.delayKnown = true; }
+          train.chTime = chTime; // keep in sync with actual live schedule/track
+          train.tripId = e.tripId; // powers the "Zuglauf" expand feature
+          return;
+        }
+
+        const dynKey = cls.type + '|' + nk;
+        if (dynamicCreated.has(dynKey)) return;
+
+        // tripFrom/tripTo are the run's true, live-confirmed origin and
+        // destination — no more guessing from a truncated passList like the
+        // old opendata.ch integration had to.
+        const from = e.tripFrom?.name, to = e.tripTo?.name;
+        if (!from || !to || from === to) return;
+        // Purely domestic runs (both ends in Switzerland) share our watched
+        // categories too (e.g. an IC that never leaves CH, or an RE7/TER
+        // that's the Basel SBB↔Basel Bad Bf domestic hop) — this dashboard
+        // is only for international border traffic.
+        if (placeCountry(e.tripFrom) === 'CH' && placeCountry(e.tripTo) === 'CH') return;
+
+        // Basel SBB is 5 min from the actual DE↔CH crossing at Basel Bad Bf
+        // — any German-bound run only shows up at "Basel SBB" here because
+        // that's the domestic-continuation stop, not because it crosses
+        // there. Only remap for a genuinely German endpoint; EC/IC through
+        // Basel toward France/Italy (or via Schaffhausen/St. Margrethen at
+        // all) keep their real crossing station.
+        let chStation = st.name;
+        if (chStation === 'Basel SBB') {
+          const foreignEnd = placeCountry(e.tripFrom) !== 'CH' ? e.tripFrom : e.tripTo;
+          if (placeCountry(foreignEnd) === 'DE') chStation = 'Basel Bad Bf';
+        }
+
+        dynamicCreated.add(dynKey);
+        TRAINS.push({
+          id: `${cls.type} ${nk}`,
+          from, to,
+          // tripFrom's own scheduled departure is the run's true origin
+          // time — powers the "not yet due to depart" status distinction.
+          dep: hhmmZurich(e.tripFrom?.scheduledDeparture) || chTime,
+          arr: '–',
+          chTime, chStation,
+          type: cls.type, region: st.region,
+          operator: e.agencyName || cls.type,
+          delay: delayMin,
+          status,
+          delayKnown,
+          tripId: e.tripId,
+          _id: dynamicSeq++,
+          _schedMin: toMin(chTime), // lets later polls re-match this same entry instead of duplicating it
+        });
+      });
+    });
+
+    // transitous.org has thin/no realtime coverage for some corridors
+    // (verified: RJX at Buchs SG, EC to/from Italy at Chiasso/Domodossola —
+    // schedule data exists but `realTime` is essentially always false).
+    // Fill delay/status gaps from transport.opendata.ch for exactly those
+    // entries and no others — transitous stays authoritative for existence,
+    // route and any delay it *did* confirm; this only ever adds missing
+    // data, never overwrites what transitous already reported.
+    await enrichFromOpendataFallback();
+
+    opendataOK = anyOk;
+    if (anyOk) pollsCompleted++;
+    dedupeAliasedStations();
+    dedupeCuratedVsDynamic();
+    dedupeSameRunDuplicates();
+    linkReplacementTrains();
+    setConn(anyOk ? 'live' : 'error');
+    applyFilters();
+    stamp();
+
+    // /stoptimes' tripFrom/tripTo only reflect whichever single GTFS leg is
+    // active at the polled station — for a line DB runs as multiple
+    // chained/interlined trip_ids under one human-facing number (confirmed:
+    // ICE 105 Hamburg→Chur showed as "Frankfurt Hbf→Chur" in the table
+    // because Basel Bad Bf's own leg only covers Frankfurt onward), that's
+    // just the active leg, not the true end-to-end journey. /api/v6/trip
+    // (with its default joinInterlinedLegs) does resolve the full journey —
+    // it's just not fetched during the main loop above to keep the 30s poll
+    // itself cheap. Fire off a one-time-per-tripId correction in the
+    // background instead; resolveTripEndpoints re-renders once it lands.
+    TRAINS.forEach(t => {
+      // A cancelled service's /trip shape is unreliable (seen resolving to
+      // a nearby local stop name instead of the real distant terminus) —
+      // leave from/to as last confirmed rather than risk corrupting it.
+      if (!t.tripId || t.status === 'cancelled') return;
+      if (tripEndpointCache.has(t.tripId)) {
+        const cached = tripEndpointCache.get(t.tripId);
+        if (cached) { t.from = cached.from; t.to = cached.to; }
+      } else {
+        resolveTripEndpoints(t);
+      }
+    });
+  } catch (e) {
+    opendataOK = false;
+    setConn('error');
+    console.log('[transitous.org] poll failed', e);
+  }
+}
+
+function setConn(s) {
+  const dot = document.getElementById('conn-dot');
+  const lbl = document.getElementById('conn-label');
+  dot.className = 'conn-dot';
+  if      (s==='live')       { dot.classList.add('live'); lbl.textContent = 'Live · transitous.org'; }
+  else if (s==='connecting') { lbl.textContent = 'Verbinde…'; }
+  else if (s==='offline')    { dot.classList.add('warn'); lbl.textContent = 'Offline – Neuverbindung…'; }
+  else if (s==='error')      { dot.classList.add('error'); lbl.textContent = 'Fehler'; }
+}
+
+function stamp() {
+  const n = new Date();
+  document.getElementById('last-update').textContent =
+    'Stand: ' + n.toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ─── UI BINDINGS ──────────────────────────────────────────────────────────────
+document.getElementById('filter-toggle-btn').addEventListener('click', (e) => {
+  document.querySelector('.main').classList.toggle('filters-hidden');
+  e.currentTarget.classList.toggle('active');
+});
+document.querySelectorAll('.hz-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    state.filters.timeHorizon = parseInt(b.dataset.h);
+    document.querySelectorAll('.hz-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    applyFilters();
+  })
+);
+document.querySelector('[data-h="2"]').classList.add('active');
+
+document.getElementById('search-input').addEventListener('input', e => {
+  state.search = e.target.value.trim(); applyFilters();
+});
+document.getElementById('sort-select').addEventListener('change', e => {
+  state.sortBy = e.target.value; applyFilters();
+});
+document.getElementById('status-filter').addEventListener('change', e => {
+  state.filters.status = e.target.value; applyFilters();
+});
+document.getElementById('region-filter').addEventListener('change', e => {
+  state.filters.region = e.target.value; applyFilters();
+});
+document.getElementById('station-filter').addEventListener('change', e => {
+  state.filters.station = e.target.value; applyFilters();
+});
+document.querySelectorAll('.type-pill').forEach(p =>
+  p.addEventListener('click', () => {
+    document.querySelectorAll('.type-pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+    state.filters.trainType = p.dataset.type; applyFilters();
+  })
+);
+document.getElementById('reload-btn').addEventListener('click', () => {
+  pollOpendata();
+  applyFilters();
+  stamp();
+});
+document.getElementById('detail-close').addEventListener('click', () => {
+  state.selectedId = null; closeDetail(); renderTable();
+});
+document.querySelectorAll('thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const colMap = {chTime:'chTime',delay:'delay',to:'to',from:'from'};
+    const c = colMap[th.dataset.col];
+    if (!c) return;
+    if (state.sortBy === c) state.sortDir *= -1;
+    else { state.sortBy=c; state.sortDir=1; }
+    document.querySelectorAll('thead th').forEach(h=>h.classList.remove('sorted'));
+    th.classList.add('sorted');
+    applyFilters();
+  });
+});
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+applyFilters();
+stamp();
+pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
+setInterval(pollOpendata, 30000);        // refresh live delays every 30s
+setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
+</script>
+</body>
+</html>
