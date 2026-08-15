@@ -962,35 +962,59 @@ async function fetchZuglaufStops(train) {
 
     let itHits = 0;
     if (train.chStation === 'Chiasso' || train.chStation === 'Domodossola') {
-      const fermate = await fetchViaggiaTrenoRun(train.chStation, number);
-      if (fermate) {
-        // Match by cleaned station name — ViaggiaTreno's own names are ALL
-        // CAPS ("MILANO CENTRALE") and occasionally spelled slightly
-        // differently, so compare case-insensitively on the cleaned name
-        // rather than requiring an exact match.
-        const byName = new Map(fermate.map(f => [cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase(), f]));
-        for (let i = 0; i < staticStops.length; i++) {
-          const s = staticStops[i];
-          if (!canApplyItSource(s)) continue;
-          const f = byName.get(cleanStationName(s.name).toUpperCase());
-          if (!f) continue;
-          const progArr = f.arrivo_teorico ?? f.programmata;
-          const progDep = f.partenza_teorica ?? f.programmata;
+      // Direction determines which end of the route is on Italian soil,
+      // and — critically — which ViaggiaTreno origin ID to query with (see
+      // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above):
+      // the destination-in-Italy direction is filed under the border
+      // station, the origin-in-Italy direction under its real Italian
+      // origin (e.g. Milano Centrale).
+      const destIsItaly = canApplyItSource(staticStops[staticStops.length - 1]);
+      const originId = destIsItaly
+        ? VIAGGIATRENO_BORDER_IDS[train.chStation]
+        : VIAGGIATRENO_ORIGIN_IDS[cleanStationName(staticStops[0].name)];
+      const fermate = await fetchViaggiaTrenoRun(originId, number);
+      if (fermate?.length) {
+        // ViaggiaTreno's fermate array only covers the Italian portion of
+        // the run end-to-end (verified: for a CH→IT train it runs border
+        // → …→ Italian destination; for IT→CH, Italian origin → …→
+        // border) — it is NOT limited to stops Transitous's /trip response
+        // already knows about. Transitous's static route is missing real
+        // stops entirely (verified: "Como S. Giovanni" absent for EC 25/28,
+        // its arrival wrongly folded into Milano Centrale's), so patching
+        // individual array slots by name can never add a missing stop —
+        // the whole Italian tail must be rebuilt from fermate directly and
+        // spliced in as a block, replacing however many (or few) stops
+        // Transitous had for that same stretch.
+        const builtStops = fermate.map(f => {
+          const progArr = f.arrivo_teorico;
+          const progDep = f.partenza_teorica;
           const delayMs = (typeof f.ritardo === 'number' ? f.ritardo : 0) * 60000;
-          const effArr = f.arrivoReale ?? f.effettiva ?? (progArr != null ? progArr + delayMs : null);
-          const effDep = f.partenzaReale ?? f.effettiva ?? (progDep != null ? progDep + delayMs : null);
-          const hasLive = f.arrivoReale != null || f.partenzaReale != null || f.effettiva != null || typeof f.ritardo === 'number';
-          stops[i] = {
-            name: s.name,
-            scheduledArrival: progArr != null ? new Date(progArr).toISOString() : s.scheduledArrival,
-            scheduledDeparture: progDep != null ? new Date(progDep).toISOString() : s.scheduledDeparture,
-            arrival: hasLive && progArr != null ? new Date(effArr).toISOString() : null,
-            departure: hasLive && progDep != null ? new Date(effDep).toISOString() : null,
+          const hasLive = f.arrivoReale != null || f.partenzaReale != null;
+          const effArr = f.arrivoReale ?? (hasLive && progArr != null ? progArr + delayMs : null);
+          const effDep = f.partenzaReale ?? (hasLive && progDep != null ? progDep + delayMs : null);
+          return {
+            name: titleCaseItalianStation(f.stazione || f.nomeStazione || ''),
+            scheduledArrival: progArr != null ? new Date(progArr).toISOString() : null,
+            scheduledDeparture: progDep != null ? new Date(progDep).toISOString() : null,
+            arrival: effArr != null ? new Date(effArr).toISOString() : null,
+            departure: effDep != null ? new Date(effDep).toISOString() : null,
             cancelled: !!f.soppressa,
             liveConfirmed: hasLive,
             source: 'viaggiatreno',
           };
-          itHits++;
+        });
+        itHits = builtStops.length;
+        if (destIsItaly) {
+          // Replace everything from the border station onward (inclusive)
+          // with ViaggiaTreno's own list — keep only the CH-side head.
+          const borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
+          stops.splice(borderIdx >= 0 ? borderIdx : stops.length, stops.length, ...builtStops);
+        } else {
+          // Replace everything up to and including the border station —
+          // keep only the CH-side tail.
+          let borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
+          if (borderIdx < 0) borderIdx = staticStops.length - 1;
+          stops.splice(0, borderIdx + 1, ...builtStops);
         }
       }
     }
@@ -1509,14 +1533,22 @@ function canApplyChSource(stop) {
 // to fetch from an https:// page ("mixed content"), independent of CORS.
 // Leave this empty to skip Italy-source entirely (Transitous-only fallback,
 // exactly like before) until the proxy is deployed.
-const VIAGGIATRENO_PROXY_BASE = 'https://hermonitor.vercel.app'; // e.g. 'https://hermonitor-viaggiatreno-proxy.<name>.workers.dev'
-// ViaggiaTreno's own station IDs for the two border stations where an
-// EC's Italian leg begins — its "andamentoTreno" query needs the train's
-// number *as filed on the Italian side* plus the ID of the station its
-// Italian-side numbering originates at. Verified: both Gotthard (Chiasso)
-// and Simplon (Domodossola) EC services are filed under the *same* number
-// as their Swiss-side one, originating exactly at the border station.
+const VIAGGIATRENO_PROXY_BASE = 'https://hermonitor.vercel.app/api'; // Vercel serves the functions under /api/*
+// ViaggiaTreno's own station IDs, keyed by the station where a train's
+// *Italian-side* numbering officially originates. This is NOT always the
+// border: verified live for both axes —
+//  - CH→IT trains (e.g. EC 25 Zürich→Milano) are filed under the BORDER
+//    station (Chiasso/Domodossola) as their origin, even though they
+//    depart from deep inside Switzerland.
+//  - IT→CH trains (e.g. EC 28 Milano→Zürich) are filed under their real
+//    Italian origin station (Milano Centrale — the only one used across
+//    this dashboard's curated Italy trains), NOT the border.
+// Using the wrong one returns either no match or the wrong train entirely
+// (originally missed, causing EC 28 etc. to silently fall back to
+// Transitous's incomplete route). fetchViaggiaTrenoRun below picks the
+// right one per-train based on direction.
 const VIAGGIATRENO_BORDER_IDS = {'Chiasso': 'S01301', 'Domodossola': 'S01003'};
+const VIAGGIATRENO_ORIGIN_IDS = {'Milano Centrale': 'S01700'};
 function isItalianStop(stop) {
   return placeCountry(stop) === 'IT';
 }
@@ -1530,15 +1562,23 @@ function viaggiatrenoMidnightMs() {
   const n = new Date();
   return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
 }
-// Fetches a train's full Italian-side run via the proxy. Returns null on
-// any failure (proxy not configured, network error, "no such train today")
-// — the caller falls back to Transitous's own (less reliable) data, never
-// leaves the row broken.
-async function fetchViaggiaTrenoRun(borderStationName, numeroTreno) {
-  const originId = VIAGGIATRENO_BORDER_IDS[borderStationName];
-  if (!VIAGGIATRENO_PROXY_BASE || !originId) return null;
+// ViaggiaTreno's own station names come back ALL CAPS ("COMO S.GIOVANNI") —
+// title-case them for display, matching the style of every other station
+// name in this dashboard.
+function titleCaseItalianStation(name) {
+  return String(name).toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
+}
+// Fetches a train's full Italian-side run via the proxy. originStationId
+// must be the correct ViaggiaTreno origin for this train's direction (see
+// VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS above) — passing the
+// wrong one returns null or a same-numbered but unrelated train. Returns
+// null on any failure (proxy not configured, network error, wrong/no match,
+// "no such train today") — the caller falls back to Transitous's own (less
+// reliable) data, never leaves the row broken.
+async function fetchViaggiaTrenoRun(originStationId, numeroTreno) {
+  if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
   try {
-    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
+    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const text = await res.text();
