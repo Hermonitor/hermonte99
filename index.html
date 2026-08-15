@@ -657,6 +657,50 @@ function inWindow(train) {
   const eff = resolveEff(train, now);
   return eff >= now - PAST_GRACE_MIN && eff <= now + hz;
 }
+// resolveEff only ever returns a "minutes from now" value, needed for
+// sorting/filtering — but which CALENDAR DAY (yesterday/today/tomorrow,
+// relative to right now) it actually picked also matters: viewing late at
+// night with a long time horizon (e.g. 23:00 with +12h) legitimately shows
+// trains whose occurrence is tomorrow, and any external lookup keyed by
+// calendar date (ViaggiaTreno's per-day service ID, an opendata.ch
+// historical anchor) needs to target THAT day, not blindly "today" —
+// otherwise a same-numbered but unrelated train from the wrong day can get
+// matched instead (confirmed: EC 61 querying ViaggiaTreno under a stale day
+// returned FART's unrelated "PE 72", which also happens to be filed under
+// train number 61 there, just on a different service day).
+function trainDayOffset(train) {
+  const raw = ((effChMin(train) % 1440) + 1440) % 1440;
+  const eff = resolveEff(train, nowMin());
+  return Math.round((eff - raw) / 1440);
+}
+// 'YYYY-MM-DD' in Europe/Zurich, independent of the viewer's own device
+// timezone — used to compare calendar days consistently (see
+// trainDayOffset and resetStaleDayConfirmations).
+function zurichDateKey(date) {
+  return date.toLocaleDateString('sv-SE', {timeZone: 'Europe/Zurich'});
+}
+function trainTargetDateKey(train) {
+  const d = new Date();
+  d.setDate(d.getDate() + trainDayOffset(train));
+  return zurichDateKey(d);
+}
+// A curated slot's delayKnown/status/liveSeen confirmation is only ever
+// valid for the specific calendar-day occurrence it was confirmed for
+// (_confirmedDateKey, set in pollOpendata) — once trainDayOffset moves on
+// to a different day's occurrence, that confirmation is stale and must
+// stop being displayed, or a real event from today's run (e.g. a genuine
+// cancellation) would otherwise keep showing against tomorrow's still-
+// unconfirmed occurrence (confirmed: IC 183 shown "cancelled" while
+// actually running fine, well after its own confirmed cancellation had
+// happened on the previous occurrence). Run once per render pass, before
+// filtering/sorting.
+function resetStaleDayConfirmations() {
+  for (const t of TRAINS) {
+    if (t.delayKnown && t._confirmedDateKey && t._confirmedDateKey !== trainTargetDateKey(t)) {
+      t.delayKnown = false; t.status = 'on-time'; t.delay = 0; t.liveSeen = false;
+    }
+  }
+}
 function minToHHMM(m) {
   const total = ((m % 1440) + 1440) % 1440;
   return String(Math.floor(total / 60)).padStart(2,'0') + ':' + String(total % 60).padStart(2,'0');
@@ -691,6 +735,7 @@ function isStaleCurated(t) {
   return resolveEff(t, now) <= now + LIVE_CONFIRM_LEAD_MIN;
 }
 function applyFilters() {
+  resetStaleDayConfirmations();
   let list = TRAINS.filter(t => {
     if (!inWindow(t)) return false;
     if (isStaleCurated(t)) return false;
@@ -916,7 +961,13 @@ async function findAdjoiningTripId(stopId, currentTripId, number, arriveBy, arou
     const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
     if (!res.ok) return null;
     const data = await res.json();
-    const hit = (data.stopTimes || []).find(s => s.tripId !== currentTripId && numKey(s.tripShortName || '') === number);
+    // tripShortName is unreliable on some feeds (confirmed: Transitous's
+    // it-trenitalia feed reports "0" for every trip regardless of the real
+    // train number — its "EC 60" service was invisible to a
+    // tripShortName-only match) — displayName ("EC 60") is the field that's
+    // actually populated correctly there, so it's checked first.
+    const hit = (data.stopTimes || []).find(s => s.tripId !== currentTripId
+      && (numKey(s.displayName || '') === number || numKey(s.tripShortName || '') === number));
     return hit ? hit.tripId : null;
   } catch (e) { return null; }
 }
@@ -1067,7 +1118,10 @@ async function fetchZuglaufStops(train) {
     }));
 
     let itHits = 0;
-    if (train.chStation === 'Chiasso' || train.chStation === 'Domodossola') {
+    // Only EC trains actually use ViaggiaTreno — gating on chStation alone
+    // would also fire for any other category discovered live at the same
+    // border station, needlessly risking a category mismatch downstream.
+    if (train.type === 'EC' && (train.chStation === 'Chiasso' || train.chStation === 'Domodossola')) {
       // Direction determines which end of the route is on Italian soil,
       // and — critically — which ViaggiaTreno origin ID to query with (see
       // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above):
@@ -1076,13 +1130,14 @@ async function fetchZuglaufStops(train) {
       // origin (e.g. Milano Centrale).
       const destIsItaly = italyIsDestination(train);
       const originId = viaggiatrenoOriginIdFor(train);
-      let fermate = await fetchViaggiaTrenoRun(originId, number);
+      const dayOffset = trainDayOffset(train);
+      let fermate = await fetchViaggiaTrenoRun(originId, number, dayOffset);
       if (!fermate?.length && !destIsItaly) {
         // IT→CH direction and either we don't have this Italian origin's ID
         // pre-mapped (VIAGGIATRENO_ORIGIN_IDS only covers the handful seen
         // so far) or the mapped ID didn't match today's run — fall back to
         // discovering the real origin by train number.
-        const resolved = await resolveViaggiaTrenoOrigin(number, train.chStation);
+        const resolved = await resolveViaggiaTrenoOrigin(number, train.chStation, dayOffset);
         if (resolved) fermate = resolved.fermate;
       }
       if (fermate?.length) {
@@ -1284,25 +1339,27 @@ async function resolveDynamicRouteEndpoints(t) {
     let trueDep = hhmmZurich(extStops[0]?.scheduledDeparture);
     // Transitous only covers the Swiss-network GTFS feed, so for a Gotthard/
     // Simplon-axis EC whose real origin or destination is on Italian soil,
-    // its own /trip response is truncated exactly at the border — trueFrom
-    // (or trueTo) comes back as the border station itself, not the actual
-    // Italian station (verified: EC 146 resolved to "Domodossola" instead
-    // of "Milano Centrale"). Detect that and ask ViaggiaTreno for the real
-    // name instead of trusting Transitous's truncated view. Only tried when
-    // extendSplitLegStops didn't already fix this side — Trenitalia isn't
-    // in Transitous's feed at all, so the generic GTFS-split extension
-    // above can never find anything for the Italy axis; this is the
-    // Italy-specific fallback for exactly that gap.
+    // its own /trip response can be truncated somewhere on the Italian
+    // side — not always exactly at the border: confirmed both "Domodossola"
+    // (EC 146, right at the border) AND "Como S. Giovanni" (EC 301/178, an
+    // intermediate Italian stop short of the true Milano Centrale
+    // terminus) as wrong trueFrom/trueTo values. extendSplitLegStops (via
+    // Transitous's own it-trenitalia feed, now that its number-matching
+    // quirk is worked around) fixes most of these directly; ViaggiaTreno is
+    // the fallback for whatever's still wrong afterward — tried whenever
+    // the resolved endpoint on the Italian-axis side isn't a recognised
+    // Swiss endpoint (i.e. always, for this axis, on whichever side is
+    // Italian) and that side wasn't already extended.
     if (live.type === 'EC' && (live.chStation === 'Chiasso' || live.chStation === 'Domodossola')) {
-      if (!backExtended && trueFrom === live.chStation) {
-        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
+      if (!backExtended && !SWISS_EC_ENDPOINTS.has(trueFrom)) {
+        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
         if (resolved) {
           trueFrom = resolved.name;
           const originDep = resolved.fermate[0]?.partenza_teorica;
           if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
         }
-      } else if (!fwdExtended && trueTo === live.chStation) {
-        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
+      } else if (!fwdExtended && !SWISS_EC_ENDPOINTS.has(trueTo)) {
+        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
         if (resolved) trueTo = resolved.name;
       }
     }
@@ -1324,20 +1381,21 @@ async function resolveDynamicRouteEndpoints(t) {
 // (chStationName) appears in it; the first one that does is accepted.
 // Returns null if nothing resolves (network failure, or genuinely no
 // matching run today).
-async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName) {
+async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName, dayOffset = 0) {
   if (!VIAGGIATRENO_PROXY_BASE) return null;
   try {
     const res = await fetch(`${VIAGGIATRENO_PROXY_BASE}/numero?numero=${encodeURIComponent(numeroTreno)}`);
     if (!res.ok) return null;
     const text = await res.text();
     if (!text) return null;
-    const todayDDMMYY = new Date().toLocaleDateString('it-IT', {timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: '2-digit'});
+    const targetDate = new Date(Date.now() + dayOffset * 86400000);
+    const targetDDMMYY = targetDate.toLocaleDateString('it-IT', {timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: '2-digit'});
     const candidates = text.split('\n').map(line => {
       const m = line.match(/^\d+\s*-\s*(.+?)\s*-\s*(\d{2}\/\d{2}\/\d{2})\|\d+-([A-Za-z0-9]+)-\d+$/);
       return m ? {name: m[1], date: m[2], id: m[3]} : null;
-    }).filter(c => c && c.date === todayDDMMYY);
+    }).filter(c => c && c.date === targetDDMMYY);
     for (const c of candidates) {
-      const fermate = await fetchViaggiaTrenoRun(c.id, numeroTreno);
+      const fermate = await fetchViaggiaTrenoRun(c.id, numeroTreno, dayOffset);
       if (fermate?.some(f => cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase() === chStationName.toUpperCase())) {
         return {name: titleCaseItalianStation(c.name), id: c.id, fermate};
       }
@@ -1351,30 +1409,36 @@ async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName) {
 // both times visible to explain why a train that was delayed earlier can
 // legitimately show as "on time" again afterward — collapsing to a single
 // value hid exactly that.
-function buildZuglaufCell(schedIso, effIso, now, cancelled) {
+// The SCHEDULED time is always what's shown — the point isn't to compute
+// and display a separate "effective" instant, it's to show the timetabled
+// time with a "+x" delay appended once it's known (matching the main
+// table's own Status-column convention). A still-upcoming stop shows the
+// scheduled time in grey, never coloured green — a not-yet-departed stop
+// isn't "on time" yet, it just hasn't happened, and colouring it green
+// reads as a confirmation that hasn't actually occurred (spotted: a stop
+// hours away already showing green because its current prognosis happened
+// to be delay:0). Colour (green/yellow/red, same thresholds as the main
+// table's Verspätung column) only ever applies once the stop is actually
+// in the past and confirmed.
+function buildZuglaufCell(schedIso, effIso, cancelled) {
   const sollStr = hhmmZurich(schedIso) || '–';
   if (!schedIso) return '<span class="td-empty">–</span>';
   if (cancelled) return `<span class="delay-high">Ausfall</span>`;
-  if (!effIso) {
-    // No live confirmation. If the scheduled time has already passed, show
-    // it as the best-available estimate (almost certainly ran close to
-    // schedule) — a still-upcoming stop stays blank, we genuinely don't
-    // know yet.
-    const isPast = resolveEff({chTime: hhmmZurich(schedIso), delay: 0}, now) < now;
-    return isPast ? `<span class="td-empty">${sollStr}</span>` : '<span class="td-empty">–</span>';
+  const isPast = new Date(schedIso).getTime() < Date.now();
+  if (!isPast || !effIso) {
+    // Not yet due, or due but not yet live-confirmed — grey either way.
+    return `<span class="td-empty">${sollStr}</span>`;
   }
   const delayMin = Math.round((new Date(effIso) - new Date(schedIso)) / 60000);
-  const istStr = hhmmZurich(effIso);
   const dCls = delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
   const dBadge = delayMin === 0 ? '' : ` <span class="td-delta ${dCls}">${delayMin > 0 ? '+' : ''}${delayMin}</span>`;
-  return `<span class="${dCls}">${istStr}</span>${dBadge}`;
+  return `<span class="${dCls}">${sollStr}</span>${dBadge}`;
 }
 function buildZuglaufTable(stops) {
-  const now = nowMin();
   const rows = stops.map(s => {
     const name = cleanStationName(s.name);
-    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, now, s.cancelled);
-    const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, now, s.cancelled);
+    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, s.cancelled);
+    const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled);
     return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
   }).join('');
   return `<table class="zuglauf-table">
@@ -1612,12 +1676,24 @@ async function geocodeStation(name) {
 // with our other Swiss-side border stations) rather than risk resolving to
 // the wrong one on a given run.
 const STATION_ID_OVERRIDES = {'Domodossola': 'ch-opentransportdataswiss26_Parent8301003'};
+// Transitous represents Genève as TWO disconnected graph nodes, one per
+// source feed — the Swiss feed's own "Genève" (what BORDER_STATIONS
+// resolves) and a wholly separate French SNCF-feed node named "Genève
+// Cornavin", which is where the Paris↔Genève TGV Lyria services actually
+// live. Querying only the Swiss node found zero Paris arrivals/departures
+// (verified live) — not because the trains don't exist, but because
+// they're simply never reachable from that node's own graph. Resolved and
+// queried as a second, dedicated stop — same idea as the Basel SBB/RE7
+// extra query below, just for a different reason (disconnected feed nodes
+// vs. a different transport mode).
+const GENEVE_CORNAVIN_STOP = {name: 'Genève Cornavin', stopId: null};
 let borderStopIdsReady = false;
 async function resolveBorderStopIds() {
   await Promise.all(BORDER_STATIONS.map(async st => {
     if (STATION_ID_OVERRIDES[st.name]) { st.stopId = STATION_ID_OVERRIDES[st.name]; return; }
     try { st.stopId = await geocodeStation(st.name); } catch (e) { st.stopId = null; }
   }));
+  try { GENEVE_CORNAVIN_STOP.stopId = await geocodeStation('Genève Cornavin'); } catch (e) { GENEVE_CORNAVIN_STOP.stopId = null; }
   borderStopIdsReady = true;
 }
 
@@ -1657,11 +1733,20 @@ async function fetchStopTimesBothDirections(stopId, extraModes) {
 
 // A run's category+number can show up as "ICE 101" in tripShortName, or as
 // a bare number ("9218") with the category only in routeShortName (seen for
-// TGV) — handle both.
+// TGV) — handle both. Neither field is reliable on every feed though:
+// confirmed live — the Swiss feed reports NJ trains with tripShortName
+// literally "NJ" (letters, no number at all) and an EMPTY routeShortName;
+// a Dutch feed for the same physical Nightjet reports the number correctly
+// in tripShortName but spells the category out in full ("Nightjet", not
+// "NJ") in routeShortName, matching neither CATEGORY_MAP key. displayName
+// ("NJ 471", "EC 60", "TER 96235") has been reliable everywhere checked
+// this session (also the fix for it-trenitalia's EC feed reporting a
+// meaningless "0" as its own tripShortName) — tried as a same-shape
+// fallback before giving up.
 function classifyEntry(e) {
-  const tsn = (e.tripShortName || '').trim();
-  const m = tsn.match(/^([A-Za-z]+)\s*(\d+)$/);
-  if (m) {
+  const parseCore = (s) => {
+    const m = (s || '').trim().match(/^([A-Za-z]+)\s*(\d+)$/);
+    if (!m) return null;
     const cat = CATEGORY_MAP[m[1].toUpperCase()];
     // numKey strips leading zeros (e.g. RE7's "005332" -> "5332") — without
     // it, the same physical run reported by two different feeds under
@@ -1669,10 +1754,29 @@ function classifyEntry(e) {
     // is created twice, and the padded form leaks into the displayed id.
     // "0" itself is a placeholder/malformed number seen occasionally in the
     // source feed, never a real train number — reject it.
-    if (cat && numKey(m[2]) !== '0') return {type: cat, number: numKey(m[2])};
-  }
+    return (cat && numKey(m[2]) !== '0') ? {type: cat, number: numKey(m[2])} : null;
+  };
+  const tsn = (e.tripShortName || '').trim();
+  const fromTsn = parseCore(tsn);
+  if (fromTsn) return fromTsn;
+  const fromDisplayName = parseCore(e.displayName);
+  if (fromDisplayName) return fromDisplayName;
   const rsn = (e.routeShortName || '').toUpperCase();
   if (CATEGORY_MAP[rsn] && /^\d+$/.test(tsn) && numKey(tsn) !== '0') return {type: CATEGORY_MAP[rsn], number: numKey(tsn)};
+  // Some feeds spell the category as a longer operator/brand phrase before
+  // the number (confirmed: the French SNCF feed reports "TGV Lyria 9266",
+  // not "TGV 9266" — neither parseCore regex above matches a multi-word
+  // prefix). Falls back to: does a known category code appear as its own
+  // word anywhere in displayName, with the number taken from the end.
+  const displayUpper = (e.displayName || '').toUpperCase();
+  const trailingNum = displayUpper.match(/(\d+)\s*$/);
+  if (trailingNum) {
+    for (const key of Object.keys(CATEGORY_MAP)) {
+      if (new RegExp(`\\b${key}\\b`).test(displayUpper) && numKey(trailingNum[1]) !== '0') {
+        return {type: CATEGORY_MAP[key], number: numKey(trailingNum[1])};
+      }
+    }
+  }
   return null;
 }
 
@@ -1758,9 +1862,9 @@ function canApplyItSource(stop) {
 // ViaggiaTreno's "service date" is midnight of the local day, as plain
 // epoch milliseconds — verified against a live response
 // ("dataPartenza":"2026-08-15 00:00:00.0" ↔ requested with 1786744800000).
-function viaggiatrenoMidnightMs() {
+function viaggiatrenoMidnightMs(dayOffset = 0) {
   const n = new Date();
-  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate() + dayOffset).getTime();
 }
 // ViaggiaTreno's own station names come back ALL CAPS ("COMO S.GIOVANNI") —
 // title-case them for display, matching the style of every other station
@@ -1775,16 +1879,22 @@ function titleCaseItalianStation(name) {
 // null on any failure (proxy not configured, network error, wrong/no match,
 // "no such train today") — the caller falls back to Transitous's own (less
 // reliable) data, never leaves the row broken.
-async function fetchViaggiaTrenoRun(originStationId, numeroTreno) {
+async function fetchViaggiaTrenoRun(originStationId, numeroTreno, dayOffset = 0) {
   if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
   try {
-    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
+    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs(dayOffset)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const text = await res.text();
     if (!text) return null; // ViaggiaTreno returns an empty body for "no such train today"
     const data = JSON.parse(text);
+    // A shared number alone isn't proof it's the right train — verified
+    // live: FART (a separate Ticino/Domodossola narrow-gauge operator, not
+    // Trenitalia) also files a service under number 61, unrelated to EC 61.
+    // categoria/compNumeroTreno confirm it's genuinely the EC being asked
+    // for, not a same-numbered service from a different operator/category.
     if (!data?.fermate?.length || String(data.numeroTreno) !== String(numeroTreno)) return null;
+    if (data.categoria && data.categoria !== 'EC' && !/\bEC\b/.test(data.compNumeroTreno || '')) return null;
     return data.fermate;
   } catch (e) { return null; }
 }
@@ -1813,10 +1923,10 @@ function viaggiatrenoOriginIdFor(train) {
 // from an unknown/unreachable proxy — only the former should ever hide a
 // row. Returns true (runs today), false (confirmed not running today), or
 // null (unknown — proxy down/misconfigured, don't hide on this).
-async function checkViaggiaTrenoRunsToday(originStationId, numeroTreno) {
+async function checkViaggiaTrenoRunsToday(originStationId, numeroTreno, dayOffset = 0) {
   if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
   try {
-    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
+    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs(dayOffset)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const text = await res.text();
@@ -1839,7 +1949,7 @@ async function markItalyTrainsNotRunningToday() {
   const candidates = TRAINS.filter(t => t.type === 'EC' && (t.chStation === 'Chiasso' || t.chStation === 'Domodossola'));
   await Promise.all(candidates.map(async t => {
     const originId = viaggiatrenoOriginIdFor(t);
-    const runs = await checkViaggiaTrenoRunsToday(originId, numKey(t.id));
+    const runs = await checkViaggiaTrenoRunsToday(originId, numKey(t.id), trainDayOffset(t));
     if (runs === false) t._notRunningToday = true;
   }));
   applyFilters();
@@ -1924,6 +2034,19 @@ async function pollOpendata() {
       } catch (e) { /* optional — main poll still succeeds without it */ }
     }
 
+    // See GENEVE_CORNAVIN_STOP above — a second, disconnected graph node
+    // for the same physical station, queried separately since Transitous
+    // never surfaces its trains from the primary Genève node. Tagged with
+    // the real Genève border-station identity (not a fake "Genève
+    // Cornavin" row) so it's treated identically downstream.
+    const geneveBorder = BORDER_STATIONS.find(s => s.name === 'Genève');
+    if (GENEVE_CORNAVIN_STOP.stopId && geneveBorder) {
+      try {
+        const cornavinRows = await fetchStopTimesBothDirections(GENEVE_CORNAVIN_STOP.stopId, ['HIGHSPEED_RAIL']);
+        results.push({st: geneveBorder, rows: cornavinRows});
+      } catch (e) { /* optional — main poll still succeeds without it */ }
+    }
+
     // Guards against creating a duplicate *dynamic* row for the same
     // physical train within one poll. Curated trains are still updated from
     // every matching row below.
@@ -1977,7 +2100,19 @@ async function pollOpendata() {
           // board under this number, as opposed to being stale/wrong
           // curated data (see isStaleCurated).
           train.liveSeen = true;
-          if (delayKnown) { train.delay = delayMin; train.status = status; train.delayKnown = true; }
+          if (delayKnown) {
+            train.delay = delayMin; train.status = status; train.delayKnown = true;
+            // Which calendar day (Zurich) this confirmation is actually
+            // FOR — a curated slot is a recurring daily schedule, so once
+            // resolveEff's chosen occurrence rolls over to the next day (see
+            // trainDayOffset), a still-attached confirmation from the
+            // PREVIOUS occurrence must stop being shown as if it applied to
+            // the new one (see the reset pass in applyFilters) — otherwise
+            // e.g. a genuine cancellation earlier today keeps being shown
+            // against tomorrow's still-unconfirmed occurrence for however
+            // long it takes a fresh poll to reach that far ahead.
+            train._confirmedDateKey = zurichDateKey(new Date(scheduledIso));
+          }
           train.chTime = chTime; // keep in sync with actual live schedule/track
           train.tripId = e.tripId; // powers the "Zuglauf" expand feature
           // Curated (BASE_TRAINS) rows are never touched — their
