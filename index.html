@@ -124,13 +124,15 @@
   .zuglauf-table th { font-family: var(--font-display); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   .zuglauf-table td { font-size: 12px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); overflow: visible; text-overflow: clip; }
   /* Station-name column: unlike the row table, names here are never the
-     bottleneck-critical column (Soll/Echtzeit/+/- are) — let long names
+     bottleneck-critical column (An/Ab are) — let long names
      ("Como S. Giovanni") wrap onto a second line instead of ellipsing. */
-  .zuglauf-table th:first-child, .zuglauf-table td:first-child { width: 42%; white-space: normal; }
-  .zuglauf-table th:not(:first-child), .zuglauf-table td:not(:first-child) { width: 19%; }
+  .zuglauf-table th:first-child, .zuglauf-table td:first-child { width: 52%; white-space: normal; }
+  .zuglauf-table th:not(:first-child), .zuglauf-table td:not(:first-child) { width: 24%; }
   .td-source { color: var(--text2); font-size: 10px; font-family: var(--font-mono); }
   .td-time { font-family: var(--font-mono); font-size: 13px; }
   .td-delay { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
+  .td-delta { font-size: 10px; font-weight: 600; }
+  .td-empty { color: var(--text2); }
   .delay-0 { color: var(--green); }
   .delay-low { color: var(--yellow); }
   .delay-high { color: var(--red); }
@@ -895,6 +897,87 @@ async function renderZuglaufPanel(t) {
 // A configurable match window (not an exact-minute compare) is used for CH
 // source matching, same idea as Transitous's own ±15min tolerance elsewhere.
 const CH_MATCH_WINDOW_MINUTES = 10;
+// GTFS occasionally represents ONE physical through-running train as TWO
+// separate trips split right at a border/interchange, one per source feed
+// — confirmed live: TER 96247 Strasbourg→Basel SBB exists as a French SNCF
+// trip ending at Saint-Louis (Haut-Rhin), stitched to a wholly separate
+// Swiss-feed trip for just Saint-Louis→Basel SBB. /api/v6/trip for either
+// tripId alone only ever returns its own half — this dashboard's discovered
+// tripId can land on either half depending on which border poll found it
+// first, so both directions need checking. Looks for the OTHER trip
+// serving the same train number, arriving at (or departing from) the given
+// stop around the given time; returns its tripId, or null if this
+// genuinely is the whole route (the common case — most trips aren't split,
+// so this is a cheap no-op most of the time).
+async function findAdjoiningTripId(stopId, currentTripId, number, arriveBy, aroundIso) {
+  if (!stopId || !aroundIso) return null;
+  try {
+    const params = new URLSearchParams({stopId, arriveBy: String(arriveBy), n: '20', window: '1800', time: aroundIso, mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
+    const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const hit = (data.stopTimes || []).find(s => s.tripId !== currentTripId && numKey(s.tripShortName || '') === number);
+    return hit ? hit.tripId : null;
+  } catch (e) { return null; }
+}
+// Fetches a trip's own leg as the flat stop array used throughout this
+// file (from + intermediateStops + to) for a single GTFS trip's route.
+async function fetchTripLegStops(tripId) {
+  try {
+    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
+    if (!res.ok) return null;
+    const data = await res.json();
+    const leg = data.legs?.[0];
+    if (!leg) return null;
+    return [leg.from, ...(leg.intermediateStops || []), leg.to];
+  } catch (e) { return null; }
+}
+// Extends a leg's stop array on either end when GTFS has split the
+// physical run into multiple trips (see findAdjoiningTripId above) — each
+// direction is checked and extended independently, so a leg truncated on
+// only one side gets exactly that side fixed. Reports which sides were
+// actually extended so the caller knows whether that edge's name still
+// needs the curated/dynamic-row override, or is now a genuine (different)
+// stop that shouldn't be renamed.
+// The adjoining trip's own stop list isn't guaranteed to end/start exactly
+// AT the shared boundary stop — verified live: the French SNCF trip for
+// TER 96247 lists its own destination as "Basel SBB" (one stop *past* the
+// actual boundary, Saint-Louis), because that feed models the whole
+// physical run start-to-finish even though the Swiss portion is
+// operationally a separate trip_id. A fixed "drop the last/first element"
+// assumption then leaves the shared boundary stop duplicated (once under
+// each feed's own slightly different name) instead of trimmed. Matching by
+// scheduled time (within a few minutes) finds the true shared stop
+// regardless of which index it lands on or what it's named.
+function trimToSharedBoundary(otherStops, sharedStop, keepBefore) {
+  const sharedTime = sharedStop.scheduledArrival || sharedStop.scheduledDeparture;
+  if (!sharedTime) return keepBefore ? otherStops.slice(0, -1) : otherStops.slice(1);
+  const idx = otherStops.findIndex(s => {
+    const t = s.scheduledArrival || s.scheduledDeparture;
+    return t && Math.abs(new Date(t) - new Date(sharedTime)) < 5 * 60000;
+  });
+  if (idx < 0) return keepBefore ? otherStops.slice(0, -1) : otherStops.slice(1);
+  return keepBefore ? otherStops.slice(0, idx) : otherStops.slice(idx + 1);
+}
+async function extendSplitLegStops(stops, tripId, number) {
+  const first = stops[0], last = stops[stops.length - 1];
+  const [backId, fwdId] = await Promise.all([
+    findAdjoiningTripId(first.stopId, tripId, number, true, first.scheduledDeparture || first.scheduledArrival),
+    findAdjoiningTripId(last.stopId, tripId, number, false, last.scheduledArrival || last.scheduledDeparture),
+  ]);
+  let result = stops, backExtended = false, fwdExtended = false;
+  if (backId) {
+    const backStops = await fetchTripLegStops(backId);
+    const trimmed = backStops?.length ? trimToSharedBoundary(backStops, first, true) : [];
+    if (trimmed.length) { result = [...trimmed, ...result]; backExtended = true; }
+  }
+  if (fwdId) {
+    const fwdStops = await fetchTripLegStops(fwdId);
+    const trimmed = fwdStops?.length ? trimToSharedBoundary(fwdStops, last, false) : [];
+    if (trimmed.length) { result = [...result, ...trimmed]; fwdExtended = true; }
+  }
+  return {stops: result, backExtended, fwdExtended};
+}
 async function fetchZuglaufStops(train) {
   const tripId = train.tripId;
   try {
@@ -903,7 +986,8 @@ async function fetchZuglaufStops(train) {
     const data = await res.json();
     const leg = data.legs?.[0];
     if (!leg) return null;
-    const staticStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
+    const rawStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
+    const {stops: staticStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, tripId, numKey(train.id));
     // The route's own first/last stop names can come back nameless or
     // truncated from the feed (confirmed: Stuttgart's "Hauptbahnhof (oben)"
     // platform label with no city at all) — the train's own from/to are
@@ -911,8 +995,15 @@ async function fetchZuglaufStops(train) {
     // the farthest-endpoint heuristic for dynamic rows), so use those for
     // the endpoints instead of trusting whatever this specific /trip
     // response's raw names are.
-    if (staticStops.length) {
+    // Skip the override on whichever edge just got genuinely extended
+    // (see extendSplitLegStops) — that stop is now a real, different
+    // station (e.g. "Strasbourg"), not the leg's original (truncated)
+    // edge, so forcing it to train.from/to would rename it right back to
+    // the wrong station.
+    if (staticStops.length && !backExtended) {
       staticStops[0] = {...staticStops[0], name: train.from};
+    }
+    if (staticStops.length && !fwdExtended) {
       staticStops[staticStops.length - 1] = {...staticStops[staticStops.length - 1], name: train.to};
     }
     const number = numKey(train.id);
@@ -926,12 +1017,21 @@ async function fetchZuglaufStops(train) {
         const chEntry = schedHHMM ? await fetchChLiveForStop(cleanStationName(s.name), train.type, number, schedHHMM, schedIso) : null;
         if (chEntry) {
           chHits++;
-          const schedInstant = chEntry.stop.departure || chEntry.stop.arrival;
-          const actualInstant = new Date(new Date(schedInstant).getTime() + chEntry.stop.delay * 60000).toISOString();
+          // opendata.ch's stationboard exposes one delay figure per entry,
+          // applying to both arrival and departure equally — but arrival
+          // and departure are still separate scheduled instants (a stop's
+          // planned dwell time), so collapsing them to a single shared
+          // "actualInstant" (as this used to) silently threw the arrival
+          // away whenever a stop had a longer planned stand, showing the
+          // *departure* time as if it were also the arrival — the exact
+          // "train suddenly looks on-time after a long dwell" confusion.
+          const delayMs = chEntry.stop.delay * 60000;
+          const actualArrival = s.scheduledArrival ? new Date(new Date(s.scheduledArrival).getTime() + delayMs).toISOString() : null;
+          const actualDeparture = s.scheduledDeparture ? new Date(new Date(s.scheduledDeparture).getTime() + delayMs).toISOString() : null;
           return {
             name: s.name,
             scheduledArrival: s.scheduledArrival, scheduledDeparture: s.scheduledDeparture,
-            arrival: actualInstant, departure: actualInstant,
+            arrival: actualArrival, departure: actualDeparture,
             cancelled: false,
             liveConfirmed: true,
             source: 'opendata.ch',
@@ -1023,18 +1123,25 @@ async function fetchZuglaufStops(train) {
             source: 'viaggiatreno',
           };
         });
-        itHits = builtStops.length;
+        // The border station itself (Chiasso/Domodossola) stays on the CH
+        // source, per the agreed rule ("bis/ab der Grenze" — the border is
+        // the last/first stop the Swiss source is authoritative for, not
+        // the first Italian one). ViaggiaTreno's own fermate array still
+        // includes it (as its own origin/destination fermata, with only a
+        // departure OR only an arrival — never both, since it's the edge
+        // of VT's queried run) — dropping it here also avoids silently
+        // replacing a CH-confirmed, fully-populated row with VT's
+        // necessarily-incomplete one for that same stop.
+        const italianOnly = destIsItaly ? builtStops.slice(1) : builtStops.slice(0, -1);
+        itHits = italianOnly.length;
         if (destIsItaly) {
-          // Replace everything from the border station onward (inclusive)
-          // with ViaggiaTreno's own list — keep only the CH-side head.
           const borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
-          stops.splice(borderIdx >= 0 ? borderIdx : stops.length, stops.length, ...builtStops);
+          const tailStart = borderIdx >= 0 ? borderIdx + 1 : stops.length;
+          stops.splice(tailStart, stops.length - tailStart, ...italianOnly);
         } else {
-          // Replace everything up to and including the border station —
-          // keep only the CH-side tail.
           let borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
           if (borderIdx < 0) borderIdx = staticStops.length - 1;
-          stops.splice(0, borderIdx + 1, ...builtStops);
+          stops.splice(0, borderIdx, ...italianOnly);
         }
       }
     }
@@ -1055,9 +1162,9 @@ async function fetchZuglaufStops(train) {
 // the common case of a still-upcoming stop); only anchors into the past
 // when that first attempt found nothing.
 async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso) {
-  const tryFetch = async (datetime) => {
+  const tryFetch = async (datetime, boardType) => {
     try {
-      let url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
+      let url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=${boardType}`;
       if (datetime) url += `&datetime=${encodeURIComponent(datetime)}`;
       const res = await fetch(url);
       if (!res.ok) return null;
@@ -1074,7 +1181,13 @@ async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso
       return best;
     } catch (e) { return null; }
   };
-  const forward = await tryFetch(null);
+  // A stop where this train only ARRIVES (its final Swiss-side stop before
+  // curving onward under a different source, e.g. the border station) can
+  // be absent from the "departure" board entirely — falling back to the
+  // "arrival" board catches that case; tried second since the vast
+  // majority of stops are intermediate ones where "departure" already
+  // matches and an extra request would be wasted.
+  const forward = await tryFetch(null, 'departure') || await tryFetch(null, 'arrival');
   if (forward) return forward;
   if (!schedIso) return null;
   // An anchor exactly AT the scheduled instant still reports delay:null
@@ -1084,7 +1197,7 @@ async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso
   const anchorDate = new Date(new Date(schedIso).getTime() + 20 * 60000);
   const pad = n => String(n).padStart(2, '0');
   const anchor = `${anchorDate.getFullYear()}-${pad(anchorDate.getMonth()+1)}-${pad(anchorDate.getDate())} ${pad(anchorDate.getHours())}:${pad(anchorDate.getMinutes())}`;
-  return await tryFetch(anchor);
+  return await tryFetch(anchor, 'departure') || await tryFetch(anchor, 'arrival');
 }
 async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
   if (!stopId) return null;
@@ -1153,7 +1266,14 @@ async function resolveDynamicRouteEndpoints(t) {
     const data = await res.json();
     const leg = data.legs?.[0];
     if (!leg) return;
-    let trueFrom = cleanStationName(leg.from?.name), trueTo = cleanStationName(leg.to?.name);
+    // Same GTFS trip-split issue as fetchZuglaufStops handles for the
+    // detail view (see extendSplitLegStops) — fix it here too, since the
+    // row's own Von/Nach come from this same truncated /trip response
+    // (confirmed: TER 96247 showed "Saint-Louis (Haut-Rhin) → Basel SBB" in
+    // both places instead of "Strasbourg → Basel SBB").
+    const rawStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
+    const {stops: extStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, t.tripId, numKey(t.id));
+    let trueFrom = cleanStationName(extStops[0]?.name), trueTo = cleanStationName(extStops[extStops.length - 1]?.name);
     if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
     const live = TRAINS.find(x => x._id === t._id);
     if (!live || live.tripId !== t.tripId || live._id < 100000 || live.status === 'cancelled') return;
@@ -1161,23 +1281,27 @@ async function resolveDynamicRouteEndpoints(t) {
     // *origin* station — dep needs correcting right alongside from/to,
     // otherwise it keeps showing the old (often border-adjacent) leg's own
     // departure time under the now-corrected origin's name.
-    let trueDep = hhmmZurich(leg.from?.scheduledDeparture);
+    let trueDep = hhmmZurich(extStops[0]?.scheduledDeparture);
     // Transitous only covers the Swiss-network GTFS feed, so for a Gotthard/
     // Simplon-axis EC whose real origin or destination is on Italian soil,
     // its own /trip response is truncated exactly at the border — trueFrom
     // (or trueTo) comes back as the border station itself, not the actual
     // Italian station (verified: EC 146 resolved to "Domodossola" instead
     // of "Milano Centrale"). Detect that and ask ViaggiaTreno for the real
-    // name instead of trusting Transitous's truncated view.
+    // name instead of trusting Transitous's truncated view. Only tried when
+    // extendSplitLegStops didn't already fix this side — Trenitalia isn't
+    // in Transitous's feed at all, so the generic GTFS-split extension
+    // above can never find anything for the Italy axis; this is the
+    // Italy-specific fallback for exactly that gap.
     if (live.type === 'EC' && (live.chStation === 'Chiasso' || live.chStation === 'Domodossola')) {
-      if (trueFrom === live.chStation) {
+      if (!backExtended && trueFrom === live.chStation) {
         const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
         if (resolved) {
           trueFrom = resolved.name;
           const originDep = resolved.fermate[0]?.partenza_teorica;
           if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
         }
-      } else if (trueTo === live.chStation) {
+      } else if (!fwdExtended && trueTo === live.chStation) {
         const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
         if (resolved) trueTo = resolved.name;
       }
@@ -1221,36 +1345,40 @@ async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName) {
     return null;
   } catch (e) { return null; }
 }
+// Separate Ankunft/Abfahrt columns (rather than one merged "Echtzeit") are
+// the point, not a cosmetic choice: a stop with a longer scheduled dwell
+// (arrives on time, but has a long planned stand before continuing) needs
+// both times visible to explain why a train that was delayed earlier can
+// legitimately show as "on time" again afterward — collapsing to a single
+// value hid exactly that.
+function buildZuglaufCell(schedIso, effIso, now, cancelled) {
+  const sollStr = hhmmZurich(schedIso) || '–';
+  if (!schedIso) return '<span class="td-empty">–</span>';
+  if (cancelled) return `<span class="delay-high">Ausfall</span>`;
+  if (!effIso) {
+    // No live confirmation. If the scheduled time has already passed, show
+    // it as the best-available estimate (almost certainly ran close to
+    // schedule) — a still-upcoming stop stays blank, we genuinely don't
+    // know yet.
+    const isPast = resolveEff({chTime: hhmmZurich(schedIso), delay: 0}, now) < now;
+    return isPast ? `<span class="td-empty">${sollStr}</span>` : '<span class="td-empty">–</span>';
+  }
+  const delayMin = Math.round((new Date(effIso) - new Date(schedIso)) / 60000);
+  const istStr = hhmmZurich(effIso);
+  const dCls = delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
+  const dBadge = delayMin === 0 ? '' : ` <span class="td-delta ${dCls}">${delayMin > 0 ? '+' : ''}${delayMin}</span>`;
+  return `<span class="${dCls}">${istStr}</span>${dBadge}`;
+}
 function buildZuglaufTable(stops) {
   const now = nowMin();
   const rows = stops.map(s => {
     const name = cleanStationName(s.name);
-    const soll = s.scheduledDeparture || s.scheduledArrival;
-    const sollStr = hhmmZurich(soll) || '–';
-    if (!s.liveConfirmed) {
-      // No live confirmation from either source. If the stop's scheduled
-      // time has already passed, show that as the best-available
-      // "effective" time (it almost certainly ran close to schedule,
-      // more useful than a bare dash) — a still-upcoming stop stays blank
-      // since we genuinely don't know yet.
-      const sollHHMM = hhmmZurich(soll);
-      const isPast = sollHHMM ? resolveEff({chTime: sollHHMM, delay: 0}, now) < now : false;
-      return `<tr><td>${name}</td><td class="td-time">${sollStr}</td><td class="td-time">${isPast ? sollStr : '–'}</td><td class="td-delay">–</td></tr>`;
-    }
-    const ist = s.departure || s.arrival;
-    const istStr = hhmmZurich(ist) || sollStr;
-    const delayMin = (soll && ist) ? Math.round((new Date(ist) - new Date(soll)) / 60000) : 0;
-    const dCls = s.cancelled ? 'delay-high' : delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
-    const dStr = s.cancelled ? 'Ausfall' : (delayMin === 0 ? '0 Min' : (delayMin > 0 ? '+' : '') + delayMin + ' Min');
-    return `<tr>
-      <td>${name}</td>
-      <td class="td-time">${sollStr}</td>
-      <td class="td-time ${dCls}">${istStr}</td>
-      <td class="td-delay ${dCls}">${dStr}</td>
-    </tr>`;
+    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, now, s.cancelled);
+    const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, now, s.cancelled);
+    return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
   }).join('');
   return `<table class="zuglauf-table">
-    <thead><tr><th>Halt</th><th>Soll</th><th>Echtzeit</th><th>+/-</th></tr></thead>
+    <thead><tr><th>Halt</th><th>An</th><th>Ab</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
