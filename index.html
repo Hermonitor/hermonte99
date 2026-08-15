@@ -120,9 +120,14 @@
   .zuglauf-toggle { font-family: var(--font-body); font-size: 10px; font-weight: 400; color: var(--text2); cursor: pointer; margin-top: 1px; }
   .zuglauf-toggle:hover { color: var(--amber); text-decoration: underline; }
   .zuglauf-msg { color: var(--text2); font-size: 12px; padding: 6px 0; }
-  .zuglauf-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .zuglauf-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 16px; }
   .zuglauf-table th { font-family: var(--font-display); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .zuglauf-table td { font-size: 12px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); }
+  .zuglauf-table td { font-size: 12px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); overflow: visible; text-overflow: clip; }
+  /* Station-name column: unlike the row table, names here are never the
+     bottleneck-critical column (Soll/Echtzeit/+/- are) — let long names
+     ("Como S. Giovanni") wrap onto a second line instead of ellipsing. */
+  .zuglauf-table th:first-child, .zuglauf-table td:first-child { width: 42%; white-space: normal; }
+  .zuglauf-table th:not(:first-child), .zuglauf-table td:not(:first-child) { width: 19%; }
   .td-source { color: var(--text2); font-size: 10px; font-family: var(--font-mono); }
   .td-time { font-family: var(--font-mono); font-size: 13px; }
   .td-delay { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
@@ -969,9 +974,17 @@ async function fetchZuglaufStops(train) {
       // the destination-in-Italy direction is filed under the border
       // station, the origin-in-Italy direction under its real Italian
       // origin (e.g. Milano Centrale).
-      const destIsItaly = cleanStationName(train.to) === 'Milano Centrale';
+      const destIsItaly = italyIsDestination(train);
       const originId = viaggiatrenoOriginIdFor(train);
-      const fermate = await fetchViaggiaTrenoRun(originId, number);
+      let fermate = await fetchViaggiaTrenoRun(originId, number);
+      if (!fermate?.length && !destIsItaly) {
+        // IT→CH direction and either we don't have this Italian origin's ID
+        // pre-mapped (VIAGGIATRENO_ORIGIN_IDS only covers the handful seen
+        // so far) or the mapped ID didn't match today's run — fall back to
+        // discovering the real origin by train number.
+        const resolved = await resolveViaggiaTrenoOrigin(number, train.chStation);
+        if (resolved) fermate = resolved.fermate;
+      }
       if (fermate?.length) {
         // ViaggiaTreno's fermate array only covers the Italian portion of
         // the run end-to-end (verified: for a CH→IT train it runs border
@@ -987,10 +1000,18 @@ async function fetchZuglaufStops(train) {
         const builtStops = fermate.map(f => {
           const progArr = f.arrivo_teorico;
           const progDep = f.partenza_teorica;
+          // ritardo (delay, in minutes) is ViaggiaTreno's live-tracked
+          // prognosis for this specific train run — present and meaningful
+          // even before arrivoReale/partenzaReale (only set once the train
+          // has actually passed a stop) exist. Gating on the Reale fields
+          // left every not-yet-reached stop showing "–" despite ViaggiaTreno
+          // already having a real-time-based estimate; use scheduled+ritardo
+          // as the effective time whenever ritardo is known, same as the
+          // Swiss stationboard source treats "delay 0, not yet departed" as
+          // a confirmed live value elsewhere in this dashboard.
           const delayMs = (typeof f.ritardo === 'number' ? f.ritardo : 0) * 60000;
-          const hasLive = f.arrivoReale != null || f.partenzaReale != null;
-          const effArr = f.arrivoReale ?? (hasLive && progArr != null ? progArr + delayMs : null);
-          const effDep = f.partenzaReale ?? (hasLive && progDep != null ? progDep + delayMs : null);
+          const effArr = f.arrivoReale ?? (progArr != null ? progArr + delayMs : null);
+          const effDep = f.partenzaReale ?? (progDep != null ? progDep + delayMs : null);
           return {
             name: titleCaseItalianStation(f.stazione || f.nomeStazione || ''),
             scheduledArrival: progArr != null ? new Date(progArr).toISOString() : null,
@@ -998,7 +1019,7 @@ async function fetchZuglaufStops(train) {
             arrival: effArr != null ? new Date(effArr).toISOString() : null,
             departure: effDep != null ? new Date(effDep).toISOString() : null,
             cancelled: !!f.soppressa,
-            liveConfirmed: hasLive,
+            liveConfirmed: true,
             source: 'viaggiatreno',
           };
         });
@@ -1132,7 +1153,7 @@ async function resolveDynamicRouteEndpoints(t) {
     const data = await res.json();
     const leg = data.legs?.[0];
     if (!leg) return;
-    const trueFrom = cleanStationName(leg.from?.name), trueTo = cleanStationName(leg.to?.name);
+    let trueFrom = cleanStationName(leg.from?.name), trueTo = cleanStationName(leg.to?.name);
     if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
     const live = TRAINS.find(x => x._id === t._id);
     if (!live || live.tripId !== t.tripId || live._id < 100000 || live.status === 'cancelled') return;
@@ -1140,13 +1161,65 @@ async function resolveDynamicRouteEndpoints(t) {
     // *origin* station — dep needs correcting right alongside from/to,
     // otherwise it keeps showing the old (often border-adjacent) leg's own
     // departure time under the now-corrected origin's name.
-    const trueDep = hhmmZurich(leg.from?.scheduledDeparture);
+    let trueDep = hhmmZurich(leg.from?.scheduledDeparture);
+    // Transitous only covers the Swiss-network GTFS feed, so for a Gotthard/
+    // Simplon-axis EC whose real origin or destination is on Italian soil,
+    // its own /trip response is truncated exactly at the border — trueFrom
+    // (or trueTo) comes back as the border station itself, not the actual
+    // Italian station (verified: EC 146 resolved to "Domodossola" instead
+    // of "Milano Centrale"). Detect that and ask ViaggiaTreno for the real
+    // name instead of trusting Transitous's truncated view.
+    if (live.type === 'EC' && (live.chStation === 'Chiasso' || live.chStation === 'Domodossola')) {
+      if (trueFrom === live.chStation) {
+        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
+        if (resolved) {
+          trueFrom = resolved.name;
+          const originDep = resolved.fermate[0]?.partenza_teorica;
+          if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
+        }
+      } else if (trueTo === live.chStation) {
+        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation);
+        if (resolved) trueTo = resolved.name;
+      }
+    }
     if (live.from !== trueFrom || live.to !== trueTo || (trueDep && live.dep !== trueDep)) {
       live.from = trueFrom; live.to = trueTo;
       if (trueDep) live.dep = trueDep;
       applyFilters();
     }
   } catch (e) { /* leave the stoptimes-derived from/to as-is */ }
+}
+// Discovers a train's TRUE Italian origin station (e.g. "Milano Centrale",
+// or any other Trenitalia origin — Venezia Santa Lucia etc.) by number,
+// for the case where we already know it's wrong/truncated but not what the
+// right answer is. ViaggiaTreno's own train-number search returns every
+// station with a same-numbered service today, usually including unrelated
+// decoys (confirmed: searching "25" also matches an unrelated Milano
+// Cadorna regional train) — each candidate is verified by actually
+// fetching its run and checking the known border station
+// (chStationName) appears in it; the first one that does is accepted.
+// Returns null if nothing resolves (network failure, or genuinely no
+// matching run today).
+async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName) {
+  if (!VIAGGIATRENO_PROXY_BASE) return null;
+  try {
+    const res = await fetch(`${VIAGGIATRENO_PROXY_BASE}/numero?numero=${encodeURIComponent(numeroTreno)}`);
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return null;
+    const todayDDMMYY = new Date().toLocaleDateString('it-IT', {timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: '2-digit'});
+    const candidates = text.split('\n').map(line => {
+      const m = line.match(/^\d+\s*-\s*(.+?)\s*-\s*(\d{2}\/\d{2}\/\d{2})\|\d+-([A-Za-z0-9]+)-\d+$/);
+      return m ? {name: m[1], date: m[2], id: m[3]} : null;
+    }).filter(c => c && c.date === todayDDMMYY);
+    for (const c of candidates) {
+      const fermate = await fetchViaggiaTrenoRun(c.id, numeroTreno);
+      if (fermate?.some(f => cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase() === chStationName.toUpperCase())) {
+        return {name: titleCaseItalianStation(c.name), id: c.id, fermate};
+      }
+    }
+    return null;
+  } catch (e) { return null; }
 }
 function buildZuglaufTable(stops) {
   const now = nowMin();
@@ -1591,9 +1664,18 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno) {
 // EC train, based on which end of its route is on Italian soil (see the
 // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above). Curated
 // data only ever uses 'Milano Centrale' as the Italian endpoint name.
+// The handful of Swiss-network endpoints this dashboard's Gotthard/Simplon-
+// axis EC trains actually terminate/originate at — per the client's own
+// description of the two axes. Everything else (Milano Centrale, Venezia
+// Santa Lucia, or any other Italian city) is, by elimination, the Italian
+// end — kept open-ended rather than a fixed Italian-names list since new
+// Trenitalia destinations shouldn't need a code change to be recognised.
+const SWISS_EC_ENDPOINTS = new Set(['Zürich HB', 'Genève', 'Basel SBB', 'Lausanne']);
+function italyIsDestination(train) {
+  return !SWISS_EC_ENDPOINTS.has(cleanStationName(train.to));
+}
 function viaggiatrenoOriginIdFor(train) {
-  const destIsItaly = cleanStationName(train.to) === 'Milano Centrale';
-  return destIsItaly
+  return italyIsDestination(train)
     ? VIAGGIATRENO_BORDER_IDS[train.chStation]
     : VIAGGIATRENO_ORIGIN_IDS[cleanStationName(train.from)];
 }
