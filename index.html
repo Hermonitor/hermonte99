@@ -688,6 +688,7 @@ function applyFilters() {
     if (!inWindow(t)) return false;
     if (isStaleCurated(t)) return false;
     if (t._hiddenDuplicate) return false;
+    if (t._notRunningToday) return false;
     if (state.filters.status !== 'all' && t.status !== state.filters.status) return false;
     if (state.filters.trainType !== 'all' && t.type !== state.filters.trainType) return false;
     if (state.filters.region !== 'all' && t.region !== state.filters.region) return false;
@@ -968,10 +969,8 @@ async function fetchZuglaufStops(train) {
       // the destination-in-Italy direction is filed under the border
       // station, the origin-in-Italy direction under its real Italian
       // origin (e.g. Milano Centrale).
-      const destIsItaly = canApplyItSource(staticStops[staticStops.length - 1]);
-      const originId = destIsItaly
-        ? VIAGGIATRENO_BORDER_IDS[train.chStation]
-        : VIAGGIATRENO_ORIGIN_IDS[cleanStationName(staticStops[0].name)];
+      const destIsItaly = cleanStationName(train.to) === 'Milano Centrale';
+      const originId = viaggiatrenoOriginIdFor(train);
       const fermate = await fetchViaggiaTrenoRun(originId, number);
       if (fermate?.length) {
         // ViaggiaTreno's fermate array only covers the Italian portion of
@@ -1588,6 +1587,53 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno) {
     return data.fermate;
   } catch (e) { return null; }
 }
+// Determines the correct ViaggiaTreno origin ID for a curated Italy-axis
+// EC train, based on which end of its route is on Italian soil (see the
+// VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above). Curated
+// data only ever uses 'Milano Centrale' as the Italian endpoint name.
+function viaggiatrenoOriginIdFor(train) {
+  const destIsItaly = cleanStationName(train.to) === 'Milano Centrale';
+  return destIsItaly
+    ? VIAGGIATRENO_BORDER_IDS[train.chStation]
+    : VIAGGIATRENO_ORIGIN_IDS[cleanStationName(train.from)];
+}
+// Unlike fetchViaggiaTrenoRun (which collapses every failure to null, since
+// its caller just wants "do I have better data or not"), this distinguishes
+// a *confirmed* "no such train today" (ViaggiaTreno's empty-body response)
+// from an unknown/unreachable proxy — only the former should ever hide a
+// row. Returns true (runs today), false (confirmed not running today), or
+// null (unknown — proxy down/misconfigured, don't hide on this).
+async function checkViaggiaTrenoRunsToday(originStationId, numeroTreno) {
+  if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
+  try {
+    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return false; // ViaggiaTreno's documented signal for "no such train today"
+    let data;
+    try { data = JSON.parse(text); } catch { return null; }
+    if (!data?.fermate?.length || String(data.numeroTreno) !== String(numeroTreno)) return null;
+    return true;
+  } catch (e) { return null; }
+}
+// EC trains on the Gotthard/Simplon axis are curated (BASE_TRAINS has no
+// per-weekday calendar), so some listed runs simply don't operate on a
+// given day (verified: EC 46 has no ViaggiaTreno match today) — checked
+// once at startup against ViaggiaTreno, the same authoritative source
+// already used for their live data, and only hides a row on a definitive
+// "not running" answer (never on a network hiccup — see
+// checkViaggiaTrenoRunsToday).
+async function markItalyTrainsNotRunningToday() {
+  if (!VIAGGIATRENO_PROXY_BASE) return;
+  const candidates = TRAINS.filter(t => t.type === 'EC' && (t.chStation === 'Chiasso' || t.chStation === 'Domodossola'));
+  await Promise.all(candidates.map(async t => {
+    const originId = viaggiatrenoOriginIdFor(t);
+    const runs = await checkViaggiaTrenoRunsToday(originId, numKey(t.id));
+    if (runs === false) t._notRunningToday = true;
+  }));
+  applyFilters();
+}
 
 // Every border/crossing station this dashboard watches, except Domodossola
 // (Italy) and Basel Bad Bf (see isSwissStop) — the Swiss-network
@@ -1945,6 +1991,7 @@ function startApp() {
   pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
   setInterval(pollOpendata, 120000);       // refresh live delays every 2 min
   setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
+  markItalyTrainsNotRunningToday();        // hide curated EC rows that don't actually run today
 }
 
 // ─── AUTH GATE ────────────────────────────────────────────────────────────────
