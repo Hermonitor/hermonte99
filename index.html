@@ -47,6 +47,8 @@
   .kpi-val.amber { color: var(--amber); }
 
   .connection-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text2); padding: 4px 10px; border: 1px solid var(--border); border-radius: 3px; }
+  .feedback-btn { font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text2); text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; transition: all 0.15s; }
+  .feedback-btn:hover { color: var(--amber); border-color: var(--amber-dim); }
   .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text2); flex-shrink: 0; }
   .conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
   .conn-dot.error { background: var(--red); }
@@ -239,6 +241,7 @@
     <div class="conn-dot" id="conn-dot"></div>
     <span id="conn-label">Verbinde…</span>
   </div>
+  <a class="feedback-btn" href="https://www.google.com" target="_blank" rel="noopener">Feedback</a>
 </header>
 
 <div class="main">
@@ -957,7 +960,42 @@ async function fetchZuglaufStops(train) {
       };
     }));
 
-    console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}`);
+    let itHits = 0;
+    if (train.chStation === 'Chiasso' || train.chStation === 'Domodossola') {
+      const fermate = await fetchViaggiaTrenoRun(train.chStation, number);
+      if (fermate) {
+        // Match by cleaned station name — ViaggiaTreno's own names are ALL
+        // CAPS ("MILANO CENTRALE") and occasionally spelled slightly
+        // differently, so compare case-insensitively on the cleaned name
+        // rather than requiring an exact match.
+        const byName = new Map(fermate.map(f => [cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase(), f]));
+        for (let i = 0; i < staticStops.length; i++) {
+          const s = staticStops[i];
+          if (!canApplyItSource(s)) continue;
+          const f = byName.get(cleanStationName(s.name).toUpperCase());
+          if (!f) continue;
+          const progArr = f.arrivo_teorico ?? f.programmata;
+          const progDep = f.partenza_teorica ?? f.programmata;
+          const delayMs = (typeof f.ritardo === 'number' ? f.ritardo : 0) * 60000;
+          const effArr = f.arrivoReale ?? f.effettiva ?? (progArr != null ? progArr + delayMs : null);
+          const effDep = f.partenzaReale ?? f.effettiva ?? (progDep != null ? progDep + delayMs : null);
+          const hasLive = f.arrivoReale != null || f.partenzaReale != null || f.effettiva != null || typeof f.ritardo === 'number';
+          stops[i] = {
+            name: s.name,
+            scheduledArrival: progArr != null ? new Date(progArr).toISOString() : s.scheduledArrival,
+            scheduledDeparture: progDep != null ? new Date(progDep).toISOString() : s.scheduledDeparture,
+            arrival: hasLive && progArr != null ? new Date(effArr).toISOString() : null,
+            departure: hasLive && progDep != null ? new Date(effDep).toISOString() : null,
+            cancelled: !!f.soppressa,
+            liveConfirmed: hasLive,
+            source: 'viaggiatreno',
+          };
+          itHits++;
+        }
+      }
+    }
+
+    console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}, ViaggiaTreno: ${itHits}`);
     return stops;
   } catch (e) { return null; }
 }
@@ -1432,12 +1470,19 @@ function classifyEntry(e) {
 // the same either way.
 
 // Hard boundary check — reused everywhere a CH-source value is considered.
-// Deliberately NOT a name check ("contains 'Basel'" etc.) — uses the same
-// timezone-based country resolution as the rest of the app (placeCountry).
-// Domodossola is the one BORDER_STATIONS entry that is NOT Swiss (it's the
-// Italian-side crossing station) — isSwissStop must say false for it.
+// Primarily country resolution (placeCountry), not a name check — except
+// for one deliberate, explicit exception: Basel Bad Bf is geographically on
+// Swiss soil (isSwissStop/placeCountry both say CH) but is DB-operated
+// German-side infrastructure, not really "the Swiss network" in the sense
+// meant here — a German train terminates/reverses there, it doesn't
+// continue running under Swiss dispatch the way it does from Basel SBB
+// onward. Explicitly excluded so the CH source is only ever preferred for
+// genuinely Swiss-network relations (Basel SBB↔Interlaken, St. Margrethen↔
+// Zürich HB, Zürich HB↔Chiasso, and reverse) — never for this one CH-soil
+// station where SBB's own realtime coverage isn't authoritative anyway.
+const CH_SOURCE_EXCLUDED_NAMES = new Set(['Basel Bad Bf']);
 function isSwissStop(stop) {
-  return placeCountry(stop) === 'CH';
+  return placeCountry(stop) === 'CH' && !CH_SOURCE_EXCLUDED_NAMES.has(cleanStationName(stop?.name));
 }
 // The single hard gate every CH-source value must pass before being
 // applied. Kept as its own function (identical body to isSwissStop) so the
@@ -1447,10 +1492,67 @@ function canApplyChSource(stop) {
   return isSwissStop(stop);
 }
 
+// ─── ITALY-PREFERRED REALTIME SOURCE (Gotthard/Simplon axis) ─────────────────
+// transitous.org's own static route for the Italian tail of a Gotthard
+// (via Chiasso) or Simplon (via Domodossola) EC is unreliable — verified:
+// EC 25 Zürich→Milano was missing its real "Como S. Giovanni" stop entirely,
+// with Milano Centrale wrongly showing Como's arrival time instead of its
+// own (20:50). ViaggiaTreno (Trenitalia's realtime system) has the correct,
+// complete, live-tracked run for both axes (verified directly against EC 25
+// and EC 41 — matches the official timetable exactly, delay included).
+// It only ever replaces the Italian portion of a route (from the border
+// station onward) — the Swiss/CH-network portion is untouched, still
+// governed by isSwissStop/canApplyChSource same as always.
+//
+// Requires a small server-side proxy (see viaggiatreno-proxy/ next to this
+// file) — ViaggiaTreno itself only serves http://, which a browser refuses
+// to fetch from an https:// page ("mixed content"), independent of CORS.
+// Leave this empty to skip Italy-source entirely (Transitous-only fallback,
+// exactly like before) until the proxy is deployed.
+const VIAGGIATRENO_PROXY_BASE = 'https://hermonitor-viaggiatreno-proxy.hermonitor.workers.dev'; // e.g. 'https://hermonitor-viaggiatreno-proxy.<name>.workers.dev'
+// ViaggiaTreno's own station IDs for the two border stations where an
+// EC's Italian leg begins — its "andamentoTreno" query needs the train's
+// number *as filed on the Italian side* plus the ID of the station its
+// Italian-side numbering originates at. Verified: both Gotthard (Chiasso)
+// and Simplon (Domodossola) EC services are filed under the *same* number
+// as their Swiss-side one, originating exactly at the border station.
+const VIAGGIATRENO_BORDER_IDS = {'Chiasso': 'S01301', 'Domodossola': 'S01003'};
+function isItalianStop(stop) {
+  return placeCountry(stop) === 'IT';
+}
+function canApplyItSource(stop) {
+  return isItalianStop(stop);
+}
+// ViaggiaTreno's "service date" is midnight of the local day, as plain
+// epoch milliseconds — verified against a live response
+// ("dataPartenza":"2026-08-15 00:00:00.0" ↔ requested with 1786744800000).
+function viaggiatrenoMidnightMs() {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+}
+// Fetches a train's full Italian-side run via the proxy. Returns null on
+// any failure (proxy not configured, network error, "no such train today")
+// — the caller falls back to Transitous's own (less reliable) data, never
+// leaves the row broken.
+async function fetchViaggiaTrenoRun(borderStationName, numeroTreno) {
+  const originId = VIAGGIATRENO_BORDER_IDS[borderStationName];
+  if (!VIAGGIATRENO_PROXY_BASE || !originId) return null;
+  try {
+    const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs()}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return null; // ViaggiaTreno returns an empty body for "no such train today"
+    const data = JSON.parse(text);
+    if (!data?.fermate?.length || String(data.numeroTreno) !== String(numeroTreno)) return null;
+    return data.fermate;
+  } catch (e) { return null; }
+}
+
 // Every border/crossing station this dashboard watches, except Domodossola
-// (Italy) — the Swiss-network stationboard has nothing to say about a
-// non-Swiss stop, so it's excluded rather than silently returning nothing.
-const CH_SOURCE_STATIONS = BORDER_STATIONS.map(s => s.name).filter(name => name !== 'Domodossola');
+// (Italy) and Basel Bad Bf (see isSwissStop) — the Swiss-network
+// stationboard has nothing authoritative to say about either.
+const CH_SOURCE_STATIONS = BORDER_STATIONS.map(s => s.name).filter(name => name !== 'Domodossola' && !CH_SOURCE_EXCLUDED_NAMES.has(name));
 async function fetchChStationboard(stationName) {
   const url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
   const res = await fetch(url);
@@ -1474,7 +1576,7 @@ async function enrichFromOpendataFallback() {
     const chTime = hhmmZurich(scheduledIso);
     const nk = numKey(entry.number);
     const train = TRAINS.find(t => t.type === type && numKey(t.id) === nk
-      && circDiff(toMin(chTime), t._schedMin) <= 15 && t.chStation !== 'Domodossola');
+      && circDiff(toMin(chTime), t._schedMin) <= 15 && t.chStation !== 'Domodossola' && !CH_SOURCE_EXCLUDED_NAMES.has(t.chStation));
     if (!train) return;
     if (typeof entry.stop?.delay !== 'number') return; // CH source has no confirmed value here — leave whatever Transitous already found
     train.delay = entry.stop.delay;
@@ -1721,7 +1823,7 @@ function setConn(s) {
   const dot = document.getElementById('conn-dot');
   const lbl = document.getElementById('conn-label');
   dot.className = 'conn-dot';
-  if      (s==='live')       { dot.classList.add('live'); lbl.textContent = 'Live · transitous.org'; }
+  if      (s==='live')       { dot.classList.add('live'); lbl.textContent = 'Live'; }
   else if (s==='connecting') { lbl.textContent = 'Verbinde…'; }
   else if (s==='offline')    { dot.classList.add('warn'); lbl.textContent = 'Offline – Neuverbindung…'; }
   else if (s==='error')      { dot.classList.add('error'); lbl.textContent = 'Fehler'; }
@@ -1801,7 +1903,7 @@ function startApp() {
   applyFilters();
   stamp();
   pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
-  setInterval(pollOpendata, 30000);        // refresh live delays every 30s
+  setInterval(pollOpendata, 120000);       // refresh live delays every 2 min
   setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
 }
 
