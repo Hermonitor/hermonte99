@@ -1812,10 +1812,26 @@ function placeDist(a, b) {
 // so an entry like that silently got treated as "today, already confirmed"
 // — reject anything whose scheduled date isn't today before it touches any
 // train record.
+// Accepts TODAY or TOMORROW's Zurich calendar date — not just today.
+// This dashboard's own valid horizon (+2h up to +12h, spanning past
+// midnight) can legitimately need to match a live entry scheduled
+// tomorrow (e.g. viewed at 22:00 with +12h showing a 06:00 train the next
+// morning) — rejecting anything but today's exact date (as this used to)
+// silently blocked EVERY such live match: the train stayed visible (the
+// window logic itself was fine) but never got its tripId/delay/
+// confirmation, since this guard ran before any of that could attach
+// (confirmed live: the +12h view was missing/unconfirmed for legitimate
+// early-tomorrow trains). Restricting to "today or tomorrow" rather than
+// removing the check entirely still rejects a genuinely stale/wrong-day
+// coincidental number reuse further out — the app's own horizon caps at
+// 12h, so nothing valid is ever further away than tomorrow.
 function isTodayZurich(iso) {
   if (!iso) return false;
   const fmt = d => d.toLocaleDateString('en-CA', {timeZone:'Europe/Zurich'});
-  return fmt(new Date(iso)) === fmt(new Date());
+  const target = fmt(new Date(iso));
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+  return target === fmt(now) || target === fmt(tomorrow);
 }
 
 // Basel SBB and Basel Bad Bf are 5 minutes apart, and both are watched
@@ -2601,18 +2617,34 @@ async function pollOpendata() {
     // once its own departure is imminent (LIVE_CONFIRM_LEAD_MIN) — this
     // catches it much earlier: every number+category actually present
     // ANYWHERE in this poll's already-fetched results (no extra requests)
-    // is collected once; a curated row that's currently visible
-    // (inWindow) but never once appears there across a few consecutive
-    // polls is treated as confirmed not running, same signal
-    // markItalyTrainsNotRunningToday uses for the Italy axis, just sourced
-    // from Transitous's own schedule data instead of ViaggiaTreno.
+    // is collected once; a curated row that's genuinely due SOON but never
+    // once appears there across a few consecutive polls is treated as
+    // confirmed not running, same signal markItalyTrainsNotRunningToday
+    // uses for the Italy axis, just sourced from Transitous's own schedule
+    // data instead of ViaggiaTreno.
+    // Deliberately scoped to a short near-term window (NOT the user's own,
+    // possibly much longer, filter horizon — inWindow used to gate this,
+    // which was the bug) — Transitous's own per-station board can get
+    // crowded out by high-frequency domestic traffic well before its
+    // nominal 13h fetch window is reached (confirmed pattern: TGV
+    // Paris↔Genève got crowded out by IC1 within a much shorter span than
+    // that). Evaluating this over a long +12h horizon meant a train due
+    // tomorrow morning could rack up 3 "missed" polls simply because
+    // Transitous's own paginated board hadn't reached that far out yet —
+    // not because it doesn't run — and then stayed wrongly hidden as "not
+    // running today" for the rest of the day (confirmed: the +12h view was
+    // missing legitimate early-tomorrow trains). A train that's still
+    // hours away doesn't have this risk from waiting; only near-term ones
+    // are checked.
     const seenNumbersToday = new Set();
     results.forEach(({rows}) => rows.forEach(e => {
       const cls = classifyEntry(e);
       if (cls) seenNumbersToday.add(cls.type + '|' + cls.number);
     }));
     TRAINS.forEach(t => {
-      if (t._id >= 100000 || t.liveSeen || t._notRunningToday || !inWindow(t)) return;
+      const eff = resolveEff(t, nowMin());
+      const dueSoon = eff <= nowMin() + 180 && eff >= nowMin() - PAST_GRACE_MIN;
+      if (t._id >= 100000 || t.liveSeen || t._notRunningToday || !dueSoon) return;
       if (seenNumbersToday.has(t.type + '|' + numKey(t.id))) { t._missedPolls = 0; return; }
       t._missedPolls = (t._missedPolls || 0) + 1;
       if (t._missedPolls >= 3) t._notRunningToday = true;
