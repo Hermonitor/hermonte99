@@ -476,7 +476,7 @@ const BASE_TRAINS = [
   // München Hbf (the EC only runs Lindau-Reutin–Zürich; the München–Lindau
   // leg is a separate connecting service). Live board is authoritative.
   {id:'EC 290', from:'Lindau-Reutin', to:'Zürich HB',   dep:'06:52', arr:'08:28', chTime:'07:08', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
-  {id:'EC 198', from:'München Hbf', to:'Zürich HB',   dep:'07:10', arr:'09:23', chTime:'08:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
+  {id:'EC 198', from:'Lindau-Reutin', to:'Zürich HB',   dep:'08:52', arr:'10:28', chTime:'09:09', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 196', from:'München Hbf', to:'Zürich HB',   dep:'09:10', arr:'11:28', chTime:'10:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 194', from:'München Hbf', to:'Zürich HB',   dep:'11:10', arr:'13:28', chTime:'12:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
   {id:'EC 192', from:'München Hbf', to:'Zürich HB',   dep:'13:10', arr:'15:28', chTime:'14:00', chStation:'St. Margrethen', type:'EC', region:'ost', operator:'SBB/DB'},
@@ -526,7 +526,7 @@ const BASE_TRAINS = [
   {id:'EC 151', from:'Basel SBB',       to:'Milano Centrale', dep:'10:47', arr:'15:08', chTime:'14:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 153', from:'Basel SBB',       to:'Milano Centrale', dep:'14:47', arr:'19:08', chTime:'18:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
 
-  {id:'EC 10',  from:'Milano Centrale', to:'Zürich HB',       dep:'06:00', arr:'10:27', chTime:'08:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  {id:'EC 10',  from:'Milano Centrale', to:'Zürich HB',       dep:'07:10', arr:'10:27', chTime:'08:05', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 12',  from:'Milano Centrale', to:'Zürich HB',       dep:'07:00', arr:'11:27', chTime:'09:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 14',  from:'Milano Centrale', to:'Zürich HB',       dep:'09:00', arr:'12:27', chTime:'10:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 16',  from:'Milano Centrale', to:'Zürich HB',       dep:'10:00', arr:'13:27', chTime:'11:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
@@ -1010,12 +1010,36 @@ function trimToSharedBoundary(otherStops, sharedStop, keepBefore) {
   if (idx < 0) return keepBefore ? otherStops.slice(0, -1) : otherStops.slice(1);
   return keepBefore ? otherStops.slice(0, idx) : otherStops.slice(idx + 1);
 }
+// A leg's own first/last stopId is specific to whichever feed reported
+// THAT leg — an adjoining trip from a DIFFERENT feed for the same physical
+// station is often simply unreachable by searching at that exact stopId,
+// even though the station is the same place (confirmed live: EC 198's
+// Swiss-feed leg starts at "Bregenz" under the Swiss feed's own node;
+// freshly geocoding the plain name "Bregenz" resolves to a completely
+// different (Austrian-feed) node, and only THAT one's stoptimes reveal the
+// earlier Lindau-Reutin-originating trip that continues as EC 198 — same
+// underlying issue as Genève's two disconnected nodes, just discovered via
+// a different symptom). Tried as a fallback, not the primary lookup, since
+// it costs an extra geocode request and the leg's own stopId already works
+// for the common case (matching feed on both sides of the split).
+async function findAdjoiningTripIdByName(stopName, ownStopId, tripId, number, arriveBy, aroundIso) {
+  if (!stopName) return null;
+  try {
+    const altId = await geocodeStation(stopName);
+    if (!altId || altId === ownStopId) return null;
+    return await findAdjoiningTripId(altId, tripId, number, arriveBy, aroundIso);
+  } catch (e) { return null; }
+}
 async function extendSplitLegStops(stops, tripId, number) {
   const first = stops[0], last = stops[stops.length - 1];
-  const [backId, fwdId] = await Promise.all([
-    findAdjoiningTripId(first.stopId, tripId, number, true, first.scheduledDeparture || first.scheduledArrival),
-    findAdjoiningTripId(last.stopId, tripId, number, false, last.scheduledArrival || last.scheduledDeparture),
+  const backAnchor = first.scheduledDeparture || first.scheduledArrival;
+  const fwdAnchor = last.scheduledArrival || last.scheduledDeparture;
+  let [backId, fwdId] = await Promise.all([
+    findAdjoiningTripId(first.stopId, tripId, number, true, backAnchor),
+    findAdjoiningTripId(last.stopId, tripId, number, false, fwdAnchor),
   ]);
+  if (!backId) backId = await findAdjoiningTripIdByName(cleanStationName(first.name), first.stopId, tripId, number, true, backAnchor);
+  if (!fwdId) fwdId = await findAdjoiningTripIdByName(cleanStationName(last.name), last.stopId, tripId, number, false, fwdAnchor);
   let result = stops, backExtended = false, fwdExtended = false;
   if (backId) {
     const backStops = await fetchTripLegStops(backId);
@@ -1199,10 +1223,56 @@ async function fetchZuglaufStops(train) {
           stops.splice(0, borderIdx, ...italianOnly);
         }
       }
+
+      // extendSplitLegStops (used above via the same axis logic elsewhere)
+      // only ever fixes truncation at the two ENDS of a route — it can't
+      // fill a gap in the MIDDLE. Confirmed live: EC 10's Transitous /trip
+      // jumped straight from Chiasso to Zürich HB, skipping Lugano/
+      // Bellinzona/Arth-Goldau/Zug entirely, for the IT→CH direction
+      // specifically. opendata.ch's own stationboard `passList` for the
+      // border station is the authoritative, always-complete Swiss-network
+      // route from there onward (verified: exactly Chiasso→Lugano→
+      // Bellinzona→Arth-Goldau→Zug→Zürich HB, matching the real timetable)
+      // — used to rebuild the Swiss side outright whenever available,
+      // rather than trying to patch individual gaps.
+      if (!destIsItaly) {
+        const chEntry = await fetchChPassList(train.chStation, train.type, number);
+        if (chEntry?.passList?.length) {
+          const delayMin = typeof chEntry.stop?.delay === 'number' ? chEntry.stop.delay : 0;
+          const delayMs = delayMin * 60000;
+          const passStops = chEntry.passList.map((p, i) => {
+            const name = cleanStationName(p.station?.name || (i === 0 ? train.chStation : ''));
+            const schedArr = p.arrival, schedDep = p.departure;
+            if (!name || (!schedArr && !schedDep)) return null; // GTFS structural points (tunnel markers etc.), not real stops
+            return {
+              name,
+              scheduledArrival: schedArr, scheduledDeparture: schedDep,
+              arrival: schedArr ? new Date(new Date(schedArr).getTime() + delayMs).toISOString() : null,
+              departure: schedDep ? new Date(new Date(schedDep).getTime() + delayMs).toISOString() : null,
+              cancelled: false, liveConfirmed: true, source: 'opendata.ch',
+            };
+          }).filter(Boolean);
+          if (passStops.length) {
+            const borderIdx = stops.findIndex(s => cleanStationName(s.name) === train.chStation);
+            const from = borderIdx >= 0 ? borderIdx : stops.length;
+            stops.splice(from, stops.length - from, ...passStops);
+          }
+        }
+      }
     }
 
     console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}, ViaggiaTreno: ${itHits}`);
     return stops;
+  } catch (e) { return null; }
+}
+// Fetches this exact train's stationboard entry (with its full passList)
+// from opendata.ch, matched by category+number — see the mid-route-gap
+// comment above for why this exists alongside the ViaggiaTreno/Transitous
+// route sources.
+async function fetchChPassList(stationName, type, number) {
+  try {
+    const rows = await fetchChStationboard(stationName);
+    return rows.find(e => CATEGORY_MAP[e.category] === type && numKey(e.number) === number) || null;
   } catch (e) { return null; }
 }
 // Matches a Swiss stationboard entry to this specific run: category +
@@ -1995,6 +2065,47 @@ async function enrichFromOpendataFallback() {
   console.log(`[opendata.ch/CH-source] ${chMatches} row-level match(es) this poll`);
 }
 
+// A given daily curated slot's own scheduled instant, adjusted for
+// whichever calendar day resolveEff is currently showing (see
+// trainDayOffset) — used to anchor a CH-source lookup at the right moment
+// even when the displayed occurrence is tomorrow's (long horizon, late at
+// night) rather than today's.
+function trainSchedIso(train) {
+  const d = new Date();
+  d.setDate(d.getDate() + trainDayOffset(train));
+  const [h, m] = train.chTime.split(':').map(Number);
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+}
+// Transitous's own "cancelled" flag isn't cross-checked against the Swiss
+// network's own authoritative source anywhere in the main poll — confirmed
+// wrong live: IC 183/488 both showed as cancelled on their Schaffhausen↔
+// Zürich HB (genuinely Swiss-network) segment while actually running.
+// opendata.ch doesn't expose an explicit "cancelled" field of its own, but
+// a successful match there means the Swiss network's own authoritative
+// source still has this exact run scheduled with a live delay reading —
+// which directly contradicts "cancelled" for that same Swiss-network stop,
+// so it's downgraded. Only ever a downgrade (cancelled → real status),
+// never the reverse — a genuinely cancelled train legitimately vanishes
+// from the CH-source board, so no match there proves nothing either way.
+async function verifyCancellationsAgainstChSource() {
+  const suspects = TRAINS.filter(t => t.status === 'cancelled' && CH_SOURCE_STATIONS.includes(t.chStation));
+  if (!suspects.length) return;
+  let anyChanged = false;
+  await Promise.all(suspects.map(async t => {
+    const schedIso = trainSchedIso(t);
+    const chEntry = await fetchChLiveForStop(t.chStation, t.type, numKey(t.id), t.chTime, schedIso);
+    if (chEntry) {
+      t.delay = chEntry.stop.delay;
+      t.status = t.delay > 5 ? 'delayed' : 'on-time';
+      t.delayKnown = true;
+      t._confirmedDateKey = zurichDateKey(new Date(schedIso));
+      anyChanged = true;
+    }
+  }));
+  if (anyChanged) applyFilters();
+}
+
 // Tried resolving the "true" origin/destination live via /api/v6/trip's
 // joined/interlined legs — dropped it. Verified unreliable: whether a given
 // tripId's own GTFS chain includes the full journey (e.g. Hamburg→Chur) or
@@ -2206,6 +2317,30 @@ async function pollOpendata() {
     // data, never overwrites what transitous already reported.
     await enrichFromOpendataFallback();
 
+    // Curated (BASE_TRAINS) slots are a hand-entered weekly-recurring
+    // guess — some genuinely don't run every day (confirmed: EC 95 doesn't
+    // run Sundays, still showed all day with no Zuglauf ever available).
+    // isStaleCurated already hides an unconfirmed curated row, but only
+    // once its own departure is imminent (LIVE_CONFIRM_LEAD_MIN) — this
+    // catches it much earlier: every number+category actually present
+    // ANYWHERE in this poll's already-fetched results (no extra requests)
+    // is collected once; a curated row that's currently visible
+    // (inWindow) but never once appears there across a few consecutive
+    // polls is treated as confirmed not running, same signal
+    // markItalyTrainsNotRunningToday uses for the Italy axis, just sourced
+    // from Transitous's own schedule data instead of ViaggiaTreno.
+    const seenNumbersToday = new Set();
+    results.forEach(({rows}) => rows.forEach(e => {
+      const cls = classifyEntry(e);
+      if (cls) seenNumbersToday.add(cls.type + '|' + cls.number);
+    }));
+    TRAINS.forEach(t => {
+      if (t._id >= 100000 || t.liveSeen || t._notRunningToday || !inWindow(t)) return;
+      if (seenNumbersToday.has(t.type + '|' + numKey(t.id))) { t._missedPolls = 0; return; }
+      t._missedPolls = (t._missedPolls || 0) + 1;
+      if (t._missedPolls >= 3) t._notRunningToday = true;
+    });
+
     opendataOK = anyOk;
     if (anyOk) pollsCompleted++;
     dedupeAliasedStations();
@@ -2243,6 +2378,8 @@ async function pollOpendata() {
         resolveDynamicRouteEndpoints(t);
       }
     });
+
+    verifyCancellationsAgainstChSource();
   } catch (e) {
     opendataOK = false;
     setConn('error');
