@@ -374,6 +374,73 @@
 </div>
 
 <script>
+// "S+U Berlin Hauptbahnhof" -> "Berlin Hbf"; "Stuttgart Hauptbahnhof (oben)"
+// -> "Stuttgart Hbf" (the "(oben/unten/tief)" suffix is just which platform
+// level at the same station, e.g. Stuttgart's underground S21 platforms —
+// not a different place). Declared at the very top of the script — BEFORE
+// BASE_TRAINS/TRAINS below — because BASE_TRAINS.map() calls this
+// immediately as part of the script's own top-level (not deferred-to-later)
+// execution; a `const` declared further down is in the temporal dead zone
+// until its own line runs, so calling this before reaching that line threw
+// "Cannot access 'STATION_NAME_ALIASES' before initialization" and aborted
+// the ENTIRE script — including the password form's event listener, which
+// is why login (and everything else) appeared broken, not just this.
+// Known problem spellings from specific feeds, keyed upper-case so both an
+// ALL-CAPS and a normally-cased variant of the same bad spelling match one
+// entry. it-trenitalia is the main offender (transliterates "ü" as "ue" on
+// top of being all-caps, which no generic title-casing fixes on its own —
+// confirmed: "ZUERICH HB" instead of "Zürich HB"); a couple of other feeds'
+// own odd formattings (a comma-separated district name, a platform-hall
+// suffix) are corrected the same way since they're just as fixed/known.
+const STATION_NAME_ALIASES = {
+  'ZUERICH HB': 'Zürich HB',
+  'ZÜRICH HB': 'Zürich HB',
+  'MILANO CENTRALE': 'Milano Centrale',
+  'BASEL SBB': 'Basel SBB',
+  'BASEL BAD BF': 'Basel Bad Bf',
+  'DOMODOSSOLA': 'Domodossola',
+  'DOMODOSSOLA (I)': 'Domodossola',
+  'CHIASSO': 'Chiasso',
+  'COMO S.GIOVANNI': 'Como S. Giovanni',
+  'COMO S. GIOVANNI': 'Como S. Giovanni',
+  'LINDAU, REUTIN BAHNHOF': 'Lindau-Reutin',
+  'LINDAU REUTIN BAHNHOF': 'Lindau-Reutin',
+};
+function cleanStationName(name) {
+  if (!name) return name;
+  let s = name
+    .replace(/^S\+U\s+/, '')
+    .replace(/\bHauptbahnhof\b/g, 'Hbf')
+    .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
+    .replace(/\s+Hall\s+\d+(\s*-\s*\d+)?$/i, '') // "Paris Gare de Lyon Hall 1 - 2" -> "Paris Gare de Lyon"
+    .trim();
+  const alias = STATION_NAME_ALIASES[s.toUpperCase()];
+  if (alias) return alias;
+  // Generic ALL-CAPS fallback for anything without a known alias above —
+  // imperfect for transliterated umlauts (no alias covers every possible
+  // station), but far better than leaving raw "SOME STATION" text
+  // on-screen, and this is what actually made ALL-CAPS names leak into
+  // train.from/train.to in the first place: dynamic rows take their
+  // from/to directly from whichever feed's own tripFrom/tripTo first
+  // reported them (see pollOpendata), with no case-normalization at all
+  // until now.
+  if (s === s.toUpperCase() && /[A-ZÀ-ÖØ-Þ]/.test(s)) {
+    s = s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
+  }
+  return s;
+}
+// Case-insensitive station-name match — some feeds (it-trenitalia in
+// particular) report every name in ALL CAPS ("CHIASSO"), which silently
+// never matches this app's normally-cased station names (train.chStation
+// etc.) under a plain === comparison. Used anywhere a stop needs to be
+// located BY NAME within a route (border-station lookups above all), not
+// for the SWISS_EC_ENDPOINTS check (see isSwissEcEndpoint — that one also
+// has to cope with transliteration, not just case, since it-trenitalia
+// spells "Zürich" as "ZUERICH", not just "ZÜRICH").
+function sameStation(a, b) {
+  return cleanStationName(a).toUpperCase() === cleanStationName(b).toUpperCase();
+}
+
 // ─── REALTIME DATA SOURCE ─────────────────────────────────────────────────────
 // transitous.org (MOTIS v2 API, api.transitous.org) — a free, no-key,
 // CORS-enabled, community-run realtime routing service covering DE/CH/FR/
@@ -1640,65 +1707,6 @@ function placeCountry(place) {
 function hhmmZurich(iso) {
   if (!iso) return null;
   return new Date(iso).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'Europe/Zurich'});
-}
-// "S+U Berlin Hauptbahnhof" -> "Berlin Hbf"; "Stuttgart Hauptbahnhof (oben)"
-// -> "Stuttgart Hbf" (the "(oben/unten/tief)" suffix is just which platform
-// level at the same station, e.g. Stuttgart's underground S21 platforms —
-// not a different place).
-// Known problem spellings from specific feeds, keyed upper-case so both an
-// ALL-CAPS and a normally-cased variant of the same bad spelling match one
-// entry. it-trenitalia is the main offender (transliterates "ü" as "ue" on
-// top of being all-caps, which no generic title-casing fixes on its own —
-// confirmed: "ZUERICH HB" instead of "Zürich HB"); a couple of other feeds'
-// own odd formattings (a comma-separated district name, a platform-hall
-// suffix) are corrected the same way since they're just as fixed/known.
-const STATION_NAME_ALIASES = {
-  'ZUERICH HB': 'Zürich HB',
-  'ZÜRICH HB': 'Zürich HB',
-  'MILANO CENTRALE': 'Milano Centrale',
-  'BASEL SBB': 'Basel SBB',
-  'BASEL BAD BF': 'Basel Bad Bf',
-  'DOMODOSSOLA': 'Domodossola',
-  'DOMODOSSOLA (I)': 'Domodossola',
-  'CHIASSO': 'Chiasso',
-  'COMO S.GIOVANNI': 'Como S. Giovanni',
-  'COMO S. GIOVANNI': 'Como S. Giovanni',
-  'LINDAU, REUTIN BAHNHOF': 'Lindau-Reutin',
-  'LINDAU REUTIN BAHNHOF': 'Lindau-Reutin',
-};
-function cleanStationName(name) {
-  if (!name) return name;
-  let s = name
-    .replace(/^S\+U\s+/, '')
-    .replace(/\bHauptbahnhof\b/g, 'Hbf')
-    .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
-    .replace(/\s+Hall\s+\d+(\s*-\s*\d+)?$/i, '') // "Paris Gare de Lyon Hall 1 - 2" -> "Paris Gare de Lyon"
-    .trim();
-  const alias = STATION_NAME_ALIASES[s.toUpperCase()];
-  if (alias) return alias;
-  // Generic ALL-CAPS fallback for anything without a known alias above —
-  // imperfect for transliterated umlauts (no alias covers every possible
-  // station), but far better than leaving raw "SOME STATION" text
-  // on-screen, and this is what actually made ALL-CAPS names leak into
-  // train.from/train.to in the first place: dynamic rows take their
-  // from/to directly from whichever feed's own tripFrom/tripTo first
-  // reported them (see pollOpendata), with no case-normalization at all
-  // until now.
-  if (s === s.toUpperCase() && /[A-ZÀ-ÖØ-Þ]/.test(s)) {
-    s = s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
-  }
-  return s;
-}
-// Case-insensitive station-name match — some feeds (it-trenitalia in
-// particular) report every name in ALL CAPS ("CHIASSO"), which silently
-// never matches this app's normally-cased station names (train.chStation
-// etc.) under a plain === comparison. Used anywhere a stop needs to be
-// located BY NAME within a route (border-station lookups above all), not
-// for the SWISS_EC_ENDPOINTS check (see isSwissEcEndpoint — that one also
-// has to cope with transliteration, not just case, since it-trenitalia
-// spells "Zürich" as "ZUERICH", not just "ZÜRICH").
-function sameStation(a, b) {
-  return cleanStationName(a).toUpperCase() === cleanStationName(b).toUpperCase();
 }
 // Some feed rows report a bare platform label with no city at all (seen:
 // Stuttgart's "Hauptbahnhof (oben)" with nothing in front of it) — after
