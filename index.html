@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hermonitor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%9A%86</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500&family=Azeret+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -1814,6 +1815,28 @@ function dedupeSameRunDuplicates() {
     const keep = list.find(t => t.delayKnown) || list.find(t => t.tripId) || list[0];
     list.forEach(t => { if (t !== keep) t._hiddenDuplicate = true; });
   });
+  // The chStation-scoped grouping above deliberately doesn't merge across
+  // different crossing stations (a number CAN legitimately cross twice the
+  // same day) — but Genève's two disconnected feed nodes (see
+  // GENEVE_CORNAVIN_STOP) means the SAME physical train can now surface
+  // once via the regular Genève/Vallorbe border poll and once via the
+  // dedicated Cornavin query, each time under a plausible-looking but
+  // different chStation (confirmed live: TGV 9279 Paris→Genève Cornavin
+  // shown crossing at BOTH "Vallorbe" and "Genève", ~1.5h apart, with the
+  // identical route and delay on both — a real second crossing would
+  // essentially never share the exact same delay figure by coincidence).
+  // Caught here by same type+number+from+to regardless of chStation.
+  const byRoute = new Map(); // "type|number|from|to" -> [train, ...]
+  TRAINS.forEach(t => {
+    if (t._hiddenDuplicate) return;
+    const key = t.type + '|' + numKey(t.id) + '|' + cleanStationName(t.from) + '|' + cleanStationName(t.to);
+    (byRoute.get(key) || byRoute.set(key, []).get(key)).push(t);
+  });
+  byRoute.forEach(list => {
+    if (list.length < 2) return;
+    const keep = list.find(t => t.delayKnown) || list.find(t => t.tripId) || list[0];
+    list.forEach(t => { if (t !== keep) t._hiddenDuplicate = true; });
+  });
 }
 
 // Swiss replacement services ("Ersatzzug") run under the cancelled train's
@@ -2237,6 +2260,49 @@ async function verifyCancellationsAgainstChSource() {
   if (anyChanged) applyFilters();
 }
 
+// ViaggiaTreno is the only reliable realtime source for the CH→IT leg of
+// an EC crossing at Chiasso/Domodossola — the Swiss source reliably
+// tracks a train ARRIVING from Italy (confirmed: EC 28's Chiasso arrival
+// got a real delay from opendata.ch) but leaves one DEPARTING into Italy
+// unresolved indefinitely (confirmed live: EC 27's own scheduled Chiasso
+// departure stayed delay:null on opendata.ch even 25 minutes after it had
+// already left), and Transitous's own realtime for this whole corridor is
+// essentially always false regardless of direction. Fills in row-level
+// delay/status from ViaggiaTreno whenever neither of those already has a
+// confirmed reading — the same source the Zuglauf panel already trusts
+// for this axis, just also applied at the row level here.
+async function enrichEcItalyRowsFromViaggiaTreno() {
+  if (!VIAGGIATRENO_PROXY_BASE) return;
+  const candidates = TRAINS.filter(t => t.type === 'EC' && !t.delayKnown
+    && (t.chStation === 'Chiasso' || t.chStation === 'Domodossola') && inWindow(t));
+  if (!candidates.length) return;
+  let anyChanged = false;
+  await Promise.all(candidates.map(async t => {
+    const destIsItaly = italyIsDestination(t);
+    const dayOffset = trainDayOffset(t);
+    let fermate = await fetchViaggiaTrenoRun(viaggiatrenoOriginIdFor(t), numKey(t.id), dayOffset);
+    if (!fermate?.length && !destIsItaly) {
+      const resolved = await resolveViaggiaTrenoOrigin(numKey(t.id), t.chStation, dayOffset);
+      if (resolved) fermate = resolved.fermate;
+    }
+    if (!fermate?.length) return;
+    // The border station's own fermata is the reading that matches this
+    // dashboard's "CH-Grenze" reference point — found by name first (most
+    // precise), falling back to whichever end of the fermate array VT
+    // files the border under for this direction (see
+    // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS above).
+    const borderF = fermate.find(f => sameStation(f.stazione || f.nomeStazione || '', t.chStation))
+      || (destIsItaly ? fermate[0] : fermate[fermate.length - 1]);
+    if (!borderF || typeof borderF.ritardo !== 'number') return;
+    t.delay = borderF.ritardo;
+    t.status = borderF.soppressa ? 'cancelled' : (t.delay > 5 ? 'delayed' : 'on-time');
+    t.delayKnown = true;
+    t._confirmedDateKey = trainTargetDateKey(t);
+    anyChanged = true;
+  }));
+  if (anyChanged) applyFilters();
+}
+
 // Tried resolving the "true" origin/destination live via /api/v6/trip's
 // joined/interlined legs — dropped it. Verified unreliable: whether a given
 // tripId's own GTFS chain includes the full journey (e.g. Hamburg→Chur) or
@@ -2520,6 +2586,7 @@ async function pollOpendata() {
     });
 
     verifyCancellationsAgainstChSource();
+    enrichEcItalyRowsFromViaggiaTreno();
   } catch (e) {
     opendataOK = false;
     setConn('error');
