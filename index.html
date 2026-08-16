@@ -1286,7 +1286,7 @@ async function fetchChPassList(stationName, type, number) {
 // real +6). Tried without an anchor first (cheaper — one fewer request for
 // the common case of a still-upcoming stop); only anchors into the past
 // when that first attempt found nothing.
-async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso) {
+async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso, requireDelay = true) {
   const tryFetch = async (datetime, boardType) => {
     try {
       let url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=${boardType}`;
@@ -1299,7 +1299,16 @@ async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso
       for (const entry of rows) {
         if (CATEGORY_MAP[entry.category] !== type || numKey(entry.number) !== number) continue;
         const iso = entry.stop?.departure || entry.stop?.arrival;
-        if (!iso || typeof entry.stop?.delay !== 'number') continue;
+        // delay is null (not yet resolved) for anything opendata.ch
+        // considers too far out — normally rejected here since a "live"
+        // stop needs an actual delay figure to show. A pure existence
+        // check (e.g. verifying a cancellation claim from elsewhere is
+        // wrong) has no use for the delay figure at all, only for the
+        // schedule slot genuinely being there — confirmed live: IC 183/
+        // 488/485, all ~8h out, all had delay:null despite running fine,
+        // which silently defeated the cancellation cross-check that
+        // requires a match here.
+        if (!iso || (requireDelay && typeof entry.stop?.delay !== 'number')) continue;
         const diff = circDiff(toMin(hhmmZurich(iso)), toMin(schedHHMM));
         if (diff <= CH_MATCH_WINDOW_MINUTES && diff < bestDiff) { bestDiff = diff; best = entry; }
       }
@@ -1401,7 +1410,7 @@ async function resolveDynamicRouteEndpoints(t) {
     let trueFrom = cleanStationName(extStops[0]?.name), trueTo = cleanStationName(extStops[extStops.length - 1]?.name);
     if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
     const live = TRAINS.find(x => x._id === t._id);
-    if (!live || live.tripId !== t.tripId || live._id < 100000 || live.status === 'cancelled') return;
+    if (!live || live.tripId !== t.tripId || live.status === 'cancelled') return;
     // "Abfahrt HH:MM Uhr" in the status column means departure from the
     // *origin* station — dep needs correcting right alongside from/to,
     // otherwise it keeps showing the old (often border-adjacent) leg's own
@@ -2094,11 +2103,17 @@ async function verifyCancellationsAgainstChSource() {
   let anyChanged = false;
   await Promise.all(suspects.map(async t => {
     const schedIso = trainSchedIso(t);
-    const chEntry = await fetchChLiveForStop(t.chStation, t.type, numKey(t.id), t.chTime, schedIso);
+    // requireDelay=false: a schedule-slot match alone is enough to
+    // disprove "cancelled" — waiting for a resolved delay figure (as the
+    // normal live-display path does) meant this NEVER fired for anything
+    // still hours out, since opendata.ch reports delay:null that far in
+    // advance (confirmed live: IC 183/488/485, all ~8h out).
+    const chEntry = await fetchChLiveForStop(t.chStation, t.type, numKey(t.id), t.chTime, schedIso, false);
     if (chEntry) {
-      t.delay = chEntry.stop.delay;
-      t.status = t.delay > 5 ? 'delayed' : 'on-time';
-      t.delayKnown = true;
+      const hasDelay = typeof chEntry.stop?.delay === 'number';
+      t.status = hasDelay ? (chEntry.stop.delay > 5 ? 'delayed' : 'on-time') : 'on-time';
+      if (hasDelay) { t.delay = chEntry.stop.delay; t.delayKnown = true; }
+      else { t.delayKnown = false; } // existence confirmed, but no real delay figure yet — don't claim confirmed punctuality
       t._confirmedDateKey = zurichDateKey(new Date(schedIso));
       anyChanged = true;
     }
@@ -2365,15 +2380,24 @@ async function pollOpendata() {
     // active at the polled station (confirmed: EC 94 showed "St. Margrethen
     // SG" as its own origin at that stop, when the physical run genuinely
     // starts at München Hbf). /api/v6/trip's joined leg *does* have the
-    // full chain (verified directly against this exact case) — dropped
-    // relying on it earlier only because it also touched curated rows, and
-    // a cancelled trip's /trip shape came back nameless/wrong. Neither risk
-    // applies to a dynamic row once cancelled + nameless results are
-    // filtered out, so it's safe to use here as a background, once-per-
-    // tripId correction (fires only for rows still on their original
-    // stoptimes-derived name, not on every poll).
+    // full chain (verified directly against this exact case). Originally
+    // scoped to dynamic rows only — curated (BASE_TRAINS) rows were left
+    // frozen on the theory that hand-entered data was more trustworthy than
+    // a live correction that had once produced a wrong result (ICE 107
+    // briefly got overwritten to "Basel Bad Bf" instead of "Hamburg Hbf").
+    // That theory no longer holds: curated data has since been caught wrong
+    // just as often (ICE 101 shown from "Hamburg Hbf" when it actually ran
+    // from Freiburg today; EC 198's curated "München Hbf" was never the
+    // real origin at all — it's "Lindau-Reutin"), while the correction
+    // mechanism itself has gotten substantially more reliable in the
+    // meantime (extendSplitLegStops fixes the exact class of truncation
+    // that caused the ICE 107 regression, plus the ViaggiaTreno fallback
+    // for the Italy axis) — so every row, curated or not, is now kept in
+    // sync with what's actually running today instead of trusting a
+    // static, possibly stale guess. Still a once-per-tripId background
+    // correction, not every poll.
     TRAINS.forEach(t => {
-      if (t._id >= 100000 && t.status !== 'cancelled' && t.tripId && t._routeFetchedFor !== t.tripId) {
+      if (t.status !== 'cancelled' && t.tripId && t._routeFetchedFor !== t.tripId) {
         t._routeFetchedFor = t.tripId;
         resolveDynamicRouteEndpoints(t);
       }
