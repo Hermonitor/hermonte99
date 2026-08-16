@@ -1081,11 +1081,20 @@ async function fetchZuglaufStops(train) {
     // (see extendSplitLegStops) — that stop is now a real, different
     // station (e.g. "Strasbourg"), not the leg's original (truncated)
     // edge, so forcing it to train.from/to would rename it right back to
-    // the wrong station.
-    if (staticStops.length && !backExtended) {
+    // the wrong station. Also skip whenever the fetched name is already a
+    // real, named station (isNamelessHbf false) — train.from/to on a
+    // dynamic row is only a first guess from whichever single poll first
+    // discovered it, and can itself be the stale/truncated one (confirmed
+    // live: IC 484's real endpoint "Stuttgart Hbf" was already fetched
+    // correctly here, but got force-renamed to the row's own stale
+    // "Singen (Hohentwiel)" — an intermediate stop hours EARLIER on the
+    // same route, not the destination at all). Only a genuinely nameless/
+    // platform-only result (e.g. "Hauptbahnhof (oben)" with no city) still
+    // needs the fallback name.
+    if (staticStops.length && !backExtended && isNamelessHbf(cleanStationName(staticStops[0]?.name))) {
       staticStops[0] = {...staticStops[0], name: train.from};
     }
-    if (staticStops.length && !fwdExtended) {
+    if (staticStops.length && !fwdExtended && isNamelessHbf(cleanStationName(staticStops[staticStops.length - 1]?.name))) {
       staticStops[staticStops.length - 1] = {...staticStops[staticStops.length - 1], name: train.to};
     }
     const number = numKey(train.id);
@@ -1464,8 +1473,24 @@ async function resolveDynamicRouteEndpoints(t) {
           if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
         }
       } else if (!fwdExtended && !isSwissEcEndpoint(trueTo)) {
-        const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
-        if (resolved) trueTo = resolved.name;
+        // CH→IT direction: unlike the IT→CH case above, the origin here
+        // is NOT unknown — ViaggiaTreno always files a CH→IT EC under the
+        // border station itself (VIAGGIATRENO_BORDER_IDS), so no number
+        // search is needed. resolveViaggiaTrenoOrigin was built for (and
+        // only validates) the opposite case — reused here for a while,
+        // it always just confirmed the border station itself as the
+        // answer (since that candidate's own fermate trivially contains
+        // the border by construction), which is exactly the wrong,
+        // already-known value (confirmed live: EC 45 kept resolving to
+        // "Domodossola" instead of its true destination "Milano
+        // Centrale"). Fetching the run directly and taking its own last
+        // fermata is the actually-correct destination lookup.
+        const originId = VIAGGIATRENO_BORDER_IDS[live.chStation];
+        const fermate = await fetchViaggiaTrenoRun(originId, numKey(live.id), trainDayOffset(live));
+        if (fermate?.length) {
+          const lastF = fermate[fermate.length - 1];
+          trueTo = titleCaseItalianStation(lastF.stazione || lastF.nomeStazione || trueTo);
+        }
       }
     }
     if (live.from !== trueFrom || live.to !== trueTo || (trueDep && live.dep !== trueDep)) {
@@ -1620,13 +1645,49 @@ function hhmmZurich(iso) {
 // -> "Stuttgart Hbf" (the "(oben/unten/tief)" suffix is just which platform
 // level at the same station, e.g. Stuttgart's underground S21 platforms —
 // not a different place).
+// Known problem spellings from specific feeds, keyed upper-case so both an
+// ALL-CAPS and a normally-cased variant of the same bad spelling match one
+// entry. it-trenitalia is the main offender (transliterates "ü" as "ue" on
+// top of being all-caps, which no generic title-casing fixes on its own —
+// confirmed: "ZUERICH HB" instead of "Zürich HB"); a couple of other feeds'
+// own odd formattings (a comma-separated district name, a platform-hall
+// suffix) are corrected the same way since they're just as fixed/known.
+const STATION_NAME_ALIASES = {
+  'ZUERICH HB': 'Zürich HB',
+  'ZÜRICH HB': 'Zürich HB',
+  'MILANO CENTRALE': 'Milano Centrale',
+  'BASEL SBB': 'Basel SBB',
+  'BASEL BAD BF': 'Basel Bad Bf',
+  'DOMODOSSOLA': 'Domodossola',
+  'DOMODOSSOLA (I)': 'Domodossola',
+  'CHIASSO': 'Chiasso',
+  'COMO S.GIOVANNI': 'Como S. Giovanni',
+  'COMO S. GIOVANNI': 'Como S. Giovanni',
+  'LINDAU, REUTIN BAHNHOF': 'Lindau-Reutin',
+  'LINDAU REUTIN BAHNHOF': 'Lindau-Reutin',
+};
 function cleanStationName(name) {
   if (!name) return name;
-  return name
+  let s = name
     .replace(/^S\+U\s+/, '')
     .replace(/\bHauptbahnhof\b/g, 'Hbf')
     .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
+    .replace(/\s+Hall\s+\d+(\s*-\s*\d+)?$/i, '') // "Paris Gare de Lyon Hall 1 - 2" -> "Paris Gare de Lyon"
     .trim();
+  const alias = STATION_NAME_ALIASES[s.toUpperCase()];
+  if (alias) return alias;
+  // Generic ALL-CAPS fallback for anything without a known alias above —
+  // imperfect for transliterated umlauts (no alias covers every possible
+  // station), but far better than leaving raw "SOME STATION" text
+  // on-screen, and this is what actually made ALL-CAPS names leak into
+  // train.from/train.to in the first place: dynamic rows take their
+  // from/to directly from whichever feed's own tripFrom/tripTo first
+  // reported them (see pollOpendata), with no case-normalization at all
+  // until now.
+  if (s === s.toUpperCase() && /[A-ZÀ-ÖØ-Þ]/.test(s)) {
+    s = s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
+  }
+  return s;
 }
 // Case-insensitive station-name match — some feeds (it-trenitalia in
 // particular) report every name in ALL CAPS ("CHIASSO"), which silently
