@@ -1364,9 +1364,89 @@ async function fetchZuglaufStops(train) {
       }
     }
 
+    let finalStops = dedupeRouteStops(stops);
+    finalStops = propagateDelayBackward(finalStops);
+    // Whatever this fetch just discovered about the route's true first/
+    // last stop is at least as reliable as — often more reliable than —
+    // whatever resolveDynamicRouteEndpoints separately determined for the
+    // OVERVIEW row: that runs its own independent extend attempt in the
+    // background and can simply fail there (timing, feed availability)
+    // even when THIS fetch, run later when the user actually opens the
+    // panel, succeeds (confirmed live: IC 389's Zuglauf correctly reached
+    // back to "Stuttgart Hbf" while the overview row stayed stuck on
+    // "Schaffhausen"; same pattern for EC 94 vs. "St. Margrethen SG").
+    // Feeds the discovery back into the row so the overview benefits too,
+    // not just this one detail view.
+    if (finalStops.length) {
+      const trueFrom = cleanStationName(finalStops[0].name), trueTo = cleanStationName(finalStops[finalStops.length - 1].name);
+      let rowChanged = false;
+      if (trueFrom && !isNamelessHbf(trueFrom) && trueFrom !== train.from) { train.from = trueFrom; rowChanged = true; }
+      if (trueTo && !isNamelessHbf(trueTo) && trueTo !== train.to) { train.to = trueTo; rowChanged = true; }
+      if (rowChanged) applyFilters();
+    }
     console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}, ViaggiaTreno: ${itHits}`);
-    return stops;
+    return finalStops;
   } catch (e) { return null; }
+}
+// extendSplitLegStops's boundary-trim (trimToSharedBoundary) occasionally
+// still leaves the SAME physical stop present twice — confirmed live: TGV
+// 9277 showed both "Frasne" and "Vallorbe" TWICE, once from the backward-
+// extended French leg and once from the original Swiss-feed leg, because
+// the two legs' own reported times for that shared pair didn't land inside
+// the 5-minute match tolerance. Rather than trying to make that boundary
+// detection perfect for every feed-pair combination, this is a safety net
+// applied to the FINAL assembled route: any station name appearing more
+// than once (anywhere, not just adjacent) collapses to a single row,
+// keeping whichever occurrence has the better data (a real live reading
+// over a merely-scheduled placeholder).
+function dedupeRouteStops(list) {
+  const seen = new Map(); // cleaned+upper name -> index in out[]
+  const out = [];
+  for (const s of list) {
+    const key = cleanStationName(s.name).toUpperCase();
+    const score = (s.liveConfirmed ? 2 : 0) + (s.arrival || s.departure ? 1 : 0);
+    if (seen.has(key)) {
+      const idx = seen.get(key);
+      const prevScore = (out[idx].liveConfirmed ? 2 : 0) + (out[idx].arrival || out[idx].departure ? 1 : 0);
+      if (score > prevScore) out[idx] = s;
+      continue;
+    }
+    seen.set(key, out.length);
+    out.push(s);
+  }
+  return out;
+}
+// Foreign (non-Swiss) stops on a route often never get their own live
+// confirmation from any source — confirmed: Transitous's own `realTime`
+// for TGV Lyria's French stops before the border is essentially always
+// false, and there's no French-network equivalent of the CH/ViaggiaTreno
+// sources this dashboard otherwise has. A delay confirmed further along
+// the SAME physical run is a far more useful estimate for an earlier,
+// still-unconfirmed stop than leaving it permanently grey — trains don't
+// meaningfully gain back time between two adjacent stops mid-journey.
+// Walks backward from the end so each gap is filled from the nearest
+// later confirmed reading; a cancellation breaks the chain (the delay
+// figure on the far side of a cancelled stretch says nothing about stops
+// before it).
+function propagateDelayBackward(stops) {
+  let knownDelay = null;
+  for (let i = stops.length - 1; i >= 0; i--) {
+    const s = stops[i];
+    if (s.cancelled) { knownDelay = null; continue; }
+    if (s.liveConfirmed) {
+      const sched = s.departure ? s.scheduledDeparture : s.scheduledArrival;
+      const actual = s.departure || s.arrival;
+      if (sched && actual) knownDelay = Math.round((new Date(actual) - new Date(sched)) / 60000);
+      continue;
+    }
+    if (knownDelay != null && (s.scheduledArrival || s.scheduledDeparture)) {
+      const delayMs = knownDelay * 60000;
+      s.arrival = s.scheduledArrival ? new Date(new Date(s.scheduledArrival).getTime() + delayMs).toISOString() : null;
+      s.departure = s.scheduledDeparture ? new Date(new Date(s.scheduledDeparture).getTime() + delayMs).toISOString() : null;
+      s.liveConfirmed = true;
+    }
+  }
+  return stops;
 }
 // Fetches this exact train's stationboard entry (with its full passList)
 // from opendata.ch, matched by category+number — see the mid-route-gap
