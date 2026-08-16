@@ -954,20 +954,27 @@ const CH_MATCH_WINDOW_MINUTES = 10;
 // stop around the given time; returns its tripId, or null if this
 // genuinely is the whole route (the common case — most trips aren't split,
 // so this is a cheap no-op most of the time).
-async function findAdjoiningTripId(stopId, currentTripId, number, arriveBy, aroundIso) {
+async function findAdjoiningTripId(stopId, currentTripId, type, number, arriveBy, aroundIso) {
   if (!stopId || !aroundIso) return null;
   try {
     const params = new URLSearchParams({stopId, arriveBy: String(arriveBy), n: '20', window: '1800', time: aroundIso, mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
     const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
     if (!res.ok) return null;
     const data = await res.json();
-    // tripShortName is unreliable on some feeds (confirmed: Transitous's
-    // it-trenitalia feed reports "0" for every trip regardless of the real
-    // train number — its "EC 60" service was invisible to a
-    // tripShortName-only match) — displayName ("EC 60") is the field that's
-    // actually populated correctly there, so it's checked first.
-    const hit = (data.stopTimes || []).find(s => s.tripId !== currentTripId
-      && (numKey(s.displayName || '') === number || numKey(s.tripShortName || '') === number));
+    // Matching on NUMBER ALONE — as this used to — silently ignores
+    // category entirely, so it happily latched onto an unrelated
+    // same-numbered service from a totally different operator (confirmed
+    // live: EC 61 got merged with FART's own "PE 72"/"RE 72" narrow-gauge
+    // Domodossola↔Locarno line, which is *also* filed under number 61
+    // there; EC 13 got merged with the domestic Interregio 13 Sargans↔
+    // Luzern line). classifyEntry (the same category+number parser used
+    // for the main border poll) rejects any category mismatch, not just
+    // number — reused here for exactly that reason, not reimplemented.
+    const hit = (data.stopTimes || []).find(s => {
+      if (s.tripId === currentTripId) return false;
+      const cls = classifyEntry(s);
+      return cls && cls.type === type && cls.number === number;
+    });
     return hit ? hit.tripId : null;
   } catch (e) { return null; }
 }
@@ -1022,24 +1029,24 @@ function trimToSharedBoundary(otherStops, sharedStop, keepBefore) {
 // a different symptom). Tried as a fallback, not the primary lookup, since
 // it costs an extra geocode request and the leg's own stopId already works
 // for the common case (matching feed on both sides of the split).
-async function findAdjoiningTripIdByName(stopName, ownStopId, tripId, number, arriveBy, aroundIso) {
+async function findAdjoiningTripIdByName(stopName, ownStopId, tripId, type, number, arriveBy, aroundIso) {
   if (!stopName) return null;
   try {
     const altId = await geocodeStation(stopName);
     if (!altId || altId === ownStopId) return null;
-    return await findAdjoiningTripId(altId, tripId, number, arriveBy, aroundIso);
+    return await findAdjoiningTripId(altId, tripId, type, number, arriveBy, aroundIso);
   } catch (e) { return null; }
 }
-async function extendSplitLegStops(stops, tripId, number) {
+async function extendSplitLegStops(stops, tripId, type, number) {
   const first = stops[0], last = stops[stops.length - 1];
   const backAnchor = first.scheduledDeparture || first.scheduledArrival;
   const fwdAnchor = last.scheduledArrival || last.scheduledDeparture;
   let [backId, fwdId] = await Promise.all([
-    findAdjoiningTripId(first.stopId, tripId, number, true, backAnchor),
-    findAdjoiningTripId(last.stopId, tripId, number, false, fwdAnchor),
+    findAdjoiningTripId(first.stopId, tripId, type, number, true, backAnchor),
+    findAdjoiningTripId(last.stopId, tripId, type, number, false, fwdAnchor),
   ]);
-  if (!backId) backId = await findAdjoiningTripIdByName(cleanStationName(first.name), first.stopId, tripId, number, true, backAnchor);
-  if (!fwdId) fwdId = await findAdjoiningTripIdByName(cleanStationName(last.name), last.stopId, tripId, number, false, fwdAnchor);
+  if (!backId) backId = await findAdjoiningTripIdByName(cleanStationName(first.name), first.stopId, tripId, type, number, true, backAnchor);
+  if (!fwdId) fwdId = await findAdjoiningTripIdByName(cleanStationName(last.name), last.stopId, tripId, type, number, false, fwdAnchor);
   let result = stops, backExtended = false, fwdExtended = false;
   if (backId) {
     const backStops = await fetchTripLegStops(backId);
@@ -1062,7 +1069,7 @@ async function fetchZuglaufStops(train) {
     const leg = data.legs?.[0];
     if (!leg) return null;
     const rawStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
-    const {stops: staticStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, tripId, numKey(train.id));
+    const {stops: staticStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, tripId, train.type, numKey(train.id));
     // The route's own first/last stop names can come back nameless or
     // truncated from the feed (confirmed: Stuttgart's "Hauptbahnhof (oben)"
     // platform label with no city at all) — the train's own from/to are
@@ -1214,12 +1221,21 @@ async function fetchZuglaufStops(train) {
         const italianOnly = destIsItaly ? builtStops.slice(1) : builtStops.slice(0, -1);
         itHits = italianOnly.length;
         if (destIsItaly) {
-          const borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
+          const borderIdx = staticStops.findIndex(s => sameStation(s.name, train.chStation));
           const tailStart = borderIdx >= 0 ? borderIdx + 1 : stops.length;
           stops.splice(tailStart, stops.length - tailStart, ...italianOnly);
         } else {
-          let borderIdx = staticStops.findIndex(s => cleanStationName(s.name) === train.chStation);
-          if (borderIdx < 0) borderIdx = staticStops.length - 1;
+          // If the border genuinely isn't in staticStops at all (not a
+          // case-sensitivity miss — confirmed live: EC 62's Transitous
+          // /trip was just [Milano Centrale, Basel SBB], skipping
+          // Domodossola AND everything else entirely), keep only the
+          // route's own first element (the origin, already verified via
+          // train.from) and let the passList repair below rebuild
+          // everything after it — NOT staticStops.length - 1, which
+          // assumed the last element was one-past-the-border and left
+          // an unrelated stop half-replaced.
+          let borderIdx = staticStops.findIndex(s => sameStation(s.name, train.chStation));
+          if (borderIdx < 0) borderIdx = 1;
           stops.splice(0, borderIdx, ...italianOnly);
         }
       }
@@ -1253,8 +1269,18 @@ async function fetchZuglaufStops(train) {
             };
           }).filter(Boolean);
           if (passStops.length) {
-            const borderIdx = stops.findIndex(s => cleanStationName(s.name) === train.chStation);
-            const from = borderIdx >= 0 ? borderIdx : stops.length;
+            // If the border isn't in `stops` at all (confirmed live: EC
+            // 62's Transitous data was just [Milano Centrale, Basel SBB],
+            // no Domodossola), replacing "from the border onward" has
+            // nothing to anchor to — falling back to "append at the end"
+            // (as this used to) left the route's own truncated tail
+            // (Basel SBB) sitting BEFORE passStops' own correct one,
+            // duplicated and out of order. The only element still trusted
+            // at that point is stops[0] (the origin) — everything after it
+            // is replaced outright, since passStops already covers the
+            // border through to the true destination.
+            const borderIdx = stops.findIndex(s => sameStation(s.name, train.chStation));
+            const from = borderIdx >= 0 ? borderIdx : 1;
             stops.splice(from, stops.length - from, ...passStops);
           }
         }
@@ -1406,7 +1432,7 @@ async function resolveDynamicRouteEndpoints(t) {
     // (confirmed: TER 96247 showed "Saint-Louis (Haut-Rhin) → Basel SBB" in
     // both places instead of "Strasbourg → Basel SBB").
     const rawStops = [leg.from, ...(leg.intermediateStops || []), leg.to];
-    const {stops: extStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, t.tripId, numKey(t.id));
+    const {stops: extStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, t.tripId, t.type, numKey(t.id));
     let trueFrom = cleanStationName(extStops[0]?.name), trueTo = cleanStationName(extStops[extStops.length - 1]?.name);
     if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
     const live = TRAINS.find(x => x._id === t._id);
@@ -1430,14 +1456,14 @@ async function resolveDynamicRouteEndpoints(t) {
     // Swiss endpoint (i.e. always, for this axis, on whichever side is
     // Italian) and that side wasn't already extended.
     if (live.type === 'EC' && (live.chStation === 'Chiasso' || live.chStation === 'Domodossola')) {
-      if (!backExtended && !SWISS_EC_ENDPOINTS.has(trueFrom)) {
+      if (!backExtended && !isSwissEcEndpoint(trueFrom)) {
         const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
         if (resolved) {
           trueFrom = resolved.name;
           const originDep = resolved.fermate[0]?.partenza_teorica;
           if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
         }
-      } else if (!fwdExtended && !SWISS_EC_ENDPOINTS.has(trueTo)) {
+      } else if (!fwdExtended && !isSwissEcEndpoint(trueTo)) {
         const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
         if (resolved) trueTo = resolved.name;
       }
@@ -1601,6 +1627,17 @@ function cleanStationName(name) {
     .replace(/\bHauptbahnhof\b/g, 'Hbf')
     .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
     .trim();
+}
+// Case-insensitive station-name match — some feeds (it-trenitalia in
+// particular) report every name in ALL CAPS ("CHIASSO"), which silently
+// never matches this app's normally-cased station names (train.chStation
+// etc.) under a plain === comparison. Used anywhere a stop needs to be
+// located BY NAME within a route (border-station lookups above all), not
+// for the SWISS_EC_ENDPOINTS check (see isSwissEcEndpoint — that one also
+// has to cope with transliteration, not just case, since it-trenitalia
+// spells "Zürich" as "ZUERICH", not just "ZÜRICH").
+function sameStation(a, b) {
+  return cleanStationName(a).toUpperCase() === cleanStationName(b).toUpperCase();
 }
 // Some feed rows report a bare platform label with no city at all (seen:
 // Stuttgart's "Hauptbahnhof (oben)" with nothing in front of it) — after
@@ -1987,9 +2024,19 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno, dayOffset = 0)
 // Santa Lucia, or any other Italian city) is, by elimination, the Italian
 // end — kept open-ended rather than a fixed Italian-names list since new
 // Trenitalia destinations shouldn't need a code change to be recognised.
-const SWISS_EC_ENDPOINTS = new Set(['Zürich HB', 'Genève', 'Basel SBB', 'Lausanne']);
+// Includes the ALL-CAPS/transliterated forms some feeds report instead of
+// the normal spelling (confirmed live: Transitous's it-trenitalia feed
+// names this stop "ZUERICH HB", not "Zürich HB" — an exact-match check
+// against just the normal spelling silently failed and misclassified the
+// true Swiss endpoint as "Italian", corrupting EC 15's own origin via a
+// wrong ViaggiaTreno fallback) — checked case-insensitively (see
+// isSwissEcEndpoint) so this only needs each spelling once.
+const SWISS_EC_ENDPOINTS = new Set(['ZÜRICH HB', 'ZUERICH HB', 'GENÈVE', 'GENEVE', 'BASEL SBB', 'LAUSANNE']);
+function isSwissEcEndpoint(name) {
+  return SWISS_EC_ENDPOINTS.has(String(name || '').toUpperCase());
+}
 function italyIsDestination(train) {
-  return !SWISS_EC_ENDPOINTS.has(cleanStationName(train.to));
+  return !isSwissEcEndpoint(cleanStationName(train.to));
 }
 function viaggiatrenoOriginIdFor(train) {
   return italyIsDestination(train)
