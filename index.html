@@ -113,7 +113,12 @@
 
   tr.now-marker { cursor: default; border-bottom: none; }
   tr.now-marker:hover { background: transparent; }
-  tr.now-marker td { padding: 4px 10px; display: flex; align-items: center; gap: 10px; }
+  /* width:100% is explicit (not left to a table-cell's default fit-content
+     sizing under display:flex, which some browsers apply inconsistently
+     inside a table) — without it the two flex:1 lines were dividing up
+     less than the full row width, so the whole line+label+line group sat
+     off-centre-left instead of centred across the row. */
+  tr.now-marker td { width: 100%; padding: 4px 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
   .now-marker-line { flex: 1; height: 1px; background: var(--amber); opacity: 0.5; }
   .now-marker-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--amber); white-space: nowrap; }
 
@@ -1164,21 +1169,31 @@ async function extendSplitLegStops(stops, tripId, type, number) {
   const first = stops[0], last = stops[stops.length - 1];
   const backAnchor = first.scheduledDeparture || first.scheduledArrival;
   const fwdAnchor = last.scheduledArrival || last.scheduledDeparture;
+  // Back/forward are entirely independent lookups (one extends the start
+  // of the route, the other the end) — every step below runs both sides
+  // together via Promise.all rather than one after the other, since this
+  // whole chain (primary lookup → name-fallback lookup → fetch the found
+  // trip's own stops) was a real contributor to the Zuglauf panel
+  // sometimes taking a long time to open when it ran fully sequentially.
   let [backId, fwdId] = await Promise.all([
     findAdjoiningTripId(first.stopId, tripId, type, number, true, backAnchor),
     findAdjoiningTripId(last.stopId, tripId, type, number, false, fwdAnchor),
   ]);
-  if (!backId) backId = await findAdjoiningTripIdByName(cleanStationName(first.name), first.stopId, tripId, type, number, true, backAnchor);
-  if (!fwdId) fwdId = await findAdjoiningTripIdByName(cleanStationName(last.name), last.stopId, tripId, type, number, false, fwdAnchor);
+  [backId, fwdId] = await Promise.all([
+    backId || findAdjoiningTripIdByName(cleanStationName(first.name), first.stopId, tripId, type, number, true, backAnchor),
+    fwdId || findAdjoiningTripIdByName(cleanStationName(last.name), last.stopId, tripId, type, number, false, fwdAnchor),
+  ]);
   let result = stops, backExtended = false, fwdExtended = false;
-  if (backId) {
-    const backStops = await fetchTripLegStops(backId);
-    const trimmed = backStops?.length ? trimToSharedBoundary(backStops, first, true) : [];
+  const [backStops, fwdStops] = await Promise.all([
+    backId ? fetchTripLegStops(backId) : null,
+    fwdId ? fetchTripLegStops(fwdId) : null,
+  ]);
+  if (backStops?.length) {
+    const trimmed = trimToSharedBoundary(backStops, first, true);
     if (trimmed.length) { result = [...trimmed, ...result]; backExtended = true; }
   }
-  if (fwdId) {
-    const fwdStops = await fetchTripLegStops(fwdId);
-    const trimmed = fwdStops?.length ? trimToSharedBoundary(fwdStops, last, false) : [];
+  if (fwdStops?.length) {
+    const trimmed = trimToSharedBoundary(fwdStops, last, false);
     if (trimmed.length) { result = [...result, ...trimmed]; fwdExtended = true; }
   }
   return {stops: result, backExtended, fwdExtended};
@@ -1420,6 +1435,7 @@ async function fetchZuglaufStops(train) {
     }
 
     let finalStops = dedupeRouteStops(stops);
+    finalStops = propagateAliasedCancellation(finalStops);
     finalStops = propagateDelayBackward(finalStops);
     finalStops = propagateDelayForward(finalStops);
     // Whatever this fetch just discovered about the route's true first/
@@ -1471,6 +1487,25 @@ function dedupeRouteStops(list) {
     out.push(s);
   }
   return out;
+}
+// Basel SBB and Basel Bad Bf are 5 minutes apart on the SAME physical
+// through-run — practically one crossing point, already treated as such
+// elsewhere (CHSTATION_ALIASES, dedupeAliasedStations). A cancellation
+// reported at one of them while the other still shows a normal live
+// reading is essentially never real: there's no plausible scenario where
+// a train runs fine into Basel Bad Bf and is cancelled five minutes later
+// at Basel SBB (or vice versa) — confirmed live: ICE 101 showed Basel Bad
+// Bf running normally (+5) immediately followed by Basel SBB "Ausfall".
+// Whichever of the pair is adjacent in the route and cancelled makes the
+// other one cancelled too.
+function propagateAliasedCancellation(stops) {
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    const nameA = cleanStationName(a.name), nameB = cleanStationName(b.name);
+    const isPair = CHSTATION_ALIASES[nameA] === nameB || CHSTATION_ALIASES[nameB] === nameA;
+    if (isPair && (a.cancelled || b.cancelled)) { a.cancelled = true; b.cancelled = true; }
+  }
+  return stops;
 }
 // Foreign (non-Swiss) stops on a route often never get their own live
 // confirmation from any source — confirmed: Transitous's own `realTime`
@@ -1760,10 +1795,18 @@ async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName, dayOffset =
       const m = line.match(/^\d+\s*-\s*(.+?)\s*-\s*(\d{2}\/\d{2}\/\d{2})\|\d+-([A-Za-z0-9]+)-\d+$/);
       return m ? {name: m[1], date: m[2], id: m[3]} : null;
     }).filter(c => c && c.date === targetDDMMYY);
-    for (const c of candidates) {
-      const fermate = await fetchViaggiaTrenoRun(c.id, numeroTreno, dayOffset);
+    // Checking candidates one-by-one (await inside the loop) meant a train
+    // whose right answer was the 2nd or 3rd candidate paid for every wrong
+    // one's full round-trip first, in sequence — a real contributor to the
+    // Zuglauf panel sometimes taking a long time to open. Candidates are
+    // independent lookups, so fetching all of them at once and picking
+    // whichever one matches cuts that to a single round-trip's worth of
+    // wait regardless of how many candidates there are.
+    const results = await Promise.all(candidates.map(c => fetchViaggiaTrenoRun(c.id, numeroTreno, dayOffset)));
+    for (let i = 0; i < candidates.length; i++) {
+      const fermate = results[i];
       if (fermate?.some(f => cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase() === chStationName.toUpperCase())) {
-        return {name: titleCaseItalianStation(c.name), id: c.id, fermate};
+        return {name: titleCaseItalianStation(candidates[i].name), id: candidates[i].id, fermate};
       }
     }
     return null;
@@ -1827,7 +1870,14 @@ function buildZuglaufTable(stops) {
     const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled, !!s.forecast);
     return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
   });
-  if (nowIdx > 0 && nowIdx < rows.length) {
+  // A cancelled segment means the train genuinely isn't running through
+  // there — placing "JETZT" right in the middle of (or next to) a
+  // cancelled stretch implies a physical position that doesn't exist
+  // (confirmed: ICE 101 showed JETZT sitting between two "Ausfall" stops).
+  // Skipped whenever either side of the boundary is cancelled.
+  const straddlesCancellation = nowIdx > 0 && nowIdx < rows.length
+    && (stops[nowIdx - 1]?.cancelled || stops[nowIdx]?.cancelled);
+  if (nowIdx > 0 && nowIdx < rows.length && !straddlesCancellation) {
     rows.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="3"><span class="now-marker-line"></span><span class="now-marker-label">JETZT</span><span class="now-marker-line"></span></td></tr>`);
   }
   return `<table class="zuglauf-table">
