@@ -113,12 +113,15 @@
 
   tr.now-marker { cursor: default; border-bottom: none; }
   tr.now-marker:hover { background: transparent; }
-  /* width:100% is explicit (not left to a table-cell's default fit-content
-     sizing under display:flex, which some browsers apply inconsistently
-     inside a table) — without it the two flex:1 lines were dividing up
-     less than the full row width, so the whole line+label+line group sat
-     off-centre-left instead of centred across the row. */
-  tr.now-marker td { width: 100%; padding: 4px 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  /* display:flex directly on a <td> still wasn't reliably centred (a
+     table cell's own sizing rules can override/ignore a flex child's
+     width:100% depending on browser) — the fix is to stop making the TD
+     itself the flex container. A plain block-level <div> inside it isn't
+     subject to any table-cell-specific sizing quirks, so it reliably
+     fills the cell's full content width (which colspan already sized
+     correctly) and centres its own line/label/line children within that. */
+  tr.now-marker td { padding: 4px 10px; }
+  .now-marker-inner { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
   .now-marker-line { flex: 1; height: 1px; background: var(--amber); opacity: 0.5; }
   .now-marker-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--amber); white-space: nowrap; }
 
@@ -418,6 +421,26 @@
 </div>
 
 <script>
+// A connectivity blip against opendata.ch/Transitous doesn't just fail one
+// request — it fails EVERY request in flight at that moment, and the
+// Zuglauf panel's own per-stop fetches (each stop tries an unanchored
+// board, then falls back to an anchored one — up to 4 requests per stop,
+// times 7+ stops on a typical route) all retry independently. Without a
+// cap, a single bad patch of connectivity turned into dozens of requests
+// each waiting out the BROWSER's own (often 30s+) default connection
+// timeout before giving up — confirmed live: opening one Zuglauf during a
+// blip produced 29 failed requests and took over 20 seconds to finally
+// render. Capping each individual attempt at a few seconds means a bad
+// patch is still slow, but bounded — not "sometimes just hangs".
+async function fetchWithTimeout(url, options, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {...options, signal: controller.signal});
+  } finally {
+    clearTimeout(timer);
+  }
+}
 // "S+U Berlin Hauptbahnhof" -> "Berlin Hbf"; "Stuttgart Hauptbahnhof (oben)"
 // -> "Stuttgart Hbf" (the "(oben/unten/tief)" suffix is just which platform
 // level at the same station, e.g. Stuttgart's underground S21 platforms —
@@ -450,6 +473,54 @@ const STATION_NAME_ALIASES = {
   'LINDAU, REUTIN BAHNHOF': 'Lindau-Reutin',
   'LINDAU REUTIN BAHNHOF': 'Lindau-Reutin',
 };
+// Same physical station, two different spellings depending on which feed's
+// leg reports it (confirmed live: IC 486 lists "Singen (Htw) Bahnhof" for
+// an intermediate stop mid-route, but "Singen (Hohentwiel)" for a different,
+// truncated leg's own endpoint) — kept separate from STATION_NAME_ALIASES
+// deliberately, since unifying them THERE would feed into cleanStationName
+// everywhere, including dedupeRouteStops, which would then merge the two
+// rows into one and silently drop whichever one carried the real arrival
+// time. Used only by the duplicate-terminus-name check below.
+const SAME_PLACE_ALIASES = [
+  ['SINGEN (HTW) BAHNHOF', 'SINGEN (HOHENTWIEL)'],
+];
+function samePlaceLoose(a, b) {
+  const ca = cleanStationName(a).toUpperCase(), cb = cleanStationName(b).toUpperCase();
+  if (ca === cb) return true;
+  return SAME_PLACE_ALIASES.some(([x, y]) => (ca === x && cb === y) || (ca === y && cb === x));
+}
+// Known real far-side terminus for specific border corridors, used only as
+// a LAST resort when the raw /trip stop name comes back nameless (see
+// isNamelessHbf) AND the row's own train.from/to can't be trusted either.
+// The usual fallback ("use train.from/to — curated data is frozen, dynamic
+// rows get widened by the farthest-endpoint heuristic") assumes that value
+// is at least a real, validated name — but a train not yet in BASE_TRAINS
+// has no curated fallback at all, and its dynamically-discovered from/to is
+// only a first guess from whichever poll found it first (confirmed live:
+// IC 486 Zürich→Stuttgart via Schaffhausen/Singen — every-other-hour
+// siblings like IC 182/186/188 ARE curated with "Stuttgart Hbf", but 486
+// itself runs on the hour in between and isn't — its own train.to had
+// already latched onto "Singen (Hohentwiel)", an intermediate stop, before
+// this fallback even ran). Scoped to corridors actually confirmed to need
+// it — not a general-purpose "assume X" map.
+const CORRIDOR_FAR_TERMINUS = {
+  'Schaffhausen:IC:to': 'Stuttgart Hbf',
+  'Schaffhausen:IC:from': 'Stuttgart Hbf',
+};
+// Picks the best available name for a route endpoint that Transitous's own
+// /trip response reported as nameless: the row's own from/to, UNLESS that
+// value is itself unusable (nameless, or a duplicate of some OTHER stop
+// already in this same route — see samePlaceLoose/CORRIDOR_FAR_TERMINUS
+// comment above) — in which case a known corridor terminus is used instead
+// if one is defined, falling back to the untrustworthy row value if not
+// (better than a bare "Hauptbahnhof (oben)" with no city on screen).
+function endpointFallbackName(train, side, staticStops) {
+  const rowValue = side === 'from' ? train.from : train.to;
+  const otherStops = side === 'from' ? staticStops.slice(1) : staticStops.slice(0, -1);
+  const rowValueUsable = rowValue && !isNamelessHbf(rowValue) && !otherStops.some(s => samePlaceLoose(s.name, rowValue));
+  if (rowValueUsable) return rowValue;
+  return CORRIDOR_FAR_TERMINUS[`${train.chStation}:${train.type}:${side}`] || rowValue;
+}
 function cleanStationName(name) {
   if (!name) return name;
   let s = name
@@ -958,7 +1029,7 @@ function renderTable() {
   // Only insert the divider at an actual boundary between past and future
   // rows — not above everything (all-future) or below everything (all-past).
   if (nowIdx > 0 && nowIdx < rowsHtml.length) {
-    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · ${minToHHMM(now)}</span><span class="now-marker-line"></span></td></tr>`);
+    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · ${minToHHMM(now)}</span><span class="now-marker-line"></span></div></td></tr>`);
   }
 
   tbody.innerHTML = rowsHtml.join('');
@@ -1086,7 +1157,7 @@ async function findAdjoiningTripId(stopId, currentTripId, type, number, arriveBy
   if (!stopId || !aroundIso) return null;
   try {
     const params = new URLSearchParams({stopId, arriveBy: String(arriveBy), n: '20', window: '1800', time: aroundIso, mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
-    const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
+    const res = await fetchWithTimeout('https://api.transitous.org/api/v6/stoptimes?' + params);
     if (!res.ok) return null;
     const data = await res.json();
     // Matching on NUMBER ALONE — as this used to — silently ignores
@@ -1110,7 +1181,7 @@ async function findAdjoiningTripId(stopId, currentTripId, type, number, arriveBy
 // file (from + intermediateStops + to) for a single GTFS trip's route.
 async function fetchTripLegStops(tripId) {
   try {
-    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
+    const res = await fetchWithTimeout('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
     if (!res.ok) return null;
     const data = await res.json();
     const leg = data.legs?.[0];
@@ -1201,7 +1272,7 @@ async function extendSplitLegStops(stops, tripId, type, number) {
 async function fetchZuglaufStops(train) {
   const tripId = train.tripId;
   try {
-    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
+    const res = await fetchWithTimeout('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(tripId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const leg = data.legs?.[0];
@@ -1230,10 +1301,10 @@ async function fetchZuglaufStops(train) {
     // platform-only result (e.g. "Hauptbahnhof (oben)" with no city) still
     // needs the fallback name.
     if (staticStops.length && !backExtended && isNamelessHbf(cleanStationName(staticStops[0]?.name))) {
-      staticStops[0] = {...staticStops[0], name: train.from};
+      staticStops[0] = {...staticStops[0], name: endpointFallbackName(train, 'from', staticStops)};
     }
     if (staticStops.length && !fwdExtended && isNamelessHbf(cleanStationName(staticStops[staticStops.length - 1]?.name))) {
-      staticStops[staticStops.length - 1] = {...staticStops[staticStops.length - 1], name: train.to};
+      staticStops[staticStops.length - 1] = {...staticStops[staticStops.length - 1], name: endpointFallbackName(train, 'to', staticStops)};
     }
     const number = numKey(train.id);
     let chHits = 0, transitousHits = 0, chIgnoredForeign = 0;
@@ -1451,10 +1522,36 @@ async function fetchZuglaufStops(train) {
     // not just this one detail view.
     if (finalStops.length) {
       const trueFrom = cleanStationName(finalStops[0].name), trueTo = cleanStationName(finalStops[finalStops.length - 1].name);
+      // The terminus stop's own `name` field can be flat-out wrong upstream
+      // even when its TIME is correct and the route was genuinely extended
+      // that far (confirmed live: IC 486's real Zuglauf ran all the way to
+      // Stuttgart — Engen/Tuttlingen/Rottweil/Horb/Herrenberg all present
+      // with plausible times — but the very last stop's name field still
+      // read "Singen (Hohentwiel)", an intermediate stop passed almost two
+      // hours earlier on the SAME route). A physical train can't legitimately
+      // terminate under the same name as a station it already stopped at
+      // earlier in the same run, so that's a reliable tell the name is
+      // stale/wrong — reject it rather than let it clobber an already-correct
+      // (often farther-reaching, see the pollOpendata farthest-endpoint
+      // heuristic) train.from/to with a worse value.
+      const toDuplicatesEarlierStop = finalStops.slice(0, -1).some(s => samePlaceLoose(s.name, trueTo));
+      const fromDuplicatesLaterStop = finalStops.slice(1).some(s => samePlaceLoose(s.name, trueFrom));
       let rowChanged = false;
-      if (trueFrom && !isNamelessHbf(trueFrom) && trueFrom !== train.from) { train.from = trueFrom; rowChanged = true; }
-      if (trueTo && !isNamelessHbf(trueTo) && trueTo !== train.to) { train.to = trueTo; rowChanged = true; }
+      if (trueFrom && !isNamelessHbf(trueFrom) && !fromDuplicatesLaterStop && trueFrom !== train.from) { train.from = trueFrom; rowChanged = true; }
+      if (trueTo && !isNamelessHbf(trueTo) && !toDuplicatesEarlierStop && trueTo !== train.to) { train.to = trueTo; rowChanged = true; }
       if (rowChanged) applyFilters();
+      // Relabel the rejected terminus row itself too — otherwise the
+      // Zuglauf TABLE still shows the wrong duplicate name on its last row
+      // even after train.to (the header above it) was corrected. Only
+      // relabels when the row's own already-known good name doesn't ALSO
+      // collide with an earlier stop (rare, but don't trade one wrong
+      // duplicate for another).
+      if (toDuplicatesEarlierStop && train.to && !isNamelessHbf(train.to) && !finalStops.slice(0, -1).some(s => samePlaceLoose(s.name, train.to))) {
+        finalStops[finalStops.length - 1] = {...finalStops[finalStops.length - 1], name: train.to};
+      }
+      if (fromDuplicatesLaterStop && train.from && !isNamelessHbf(train.from) && !finalStops.slice(1).some(s => samePlaceLoose(s.name, train.from))) {
+        finalStops[0] = {...finalStops[0], name: train.from};
+      }
     }
     console.log(`[Zuglauf ${train.id}] ${staticStops.length} stops — CH source: ${chHits}, Transitous: ${transitousHits}, non-CH skipped for CH source: ${chIgnoredForeign}, ViaggiaTreno: ${itHits}`);
     return finalStops;
@@ -1597,7 +1694,7 @@ async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso
     try {
       let url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=${boardType}`;
       if (datetime) url += `&datetime=${encodeURIComponent(datetime)}`;
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url);
       if (!res.ok) return null;
       const data = await res.json();
       const rows = data.stationboard || [];
@@ -1645,7 +1742,7 @@ async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
     try {
       const params = new URLSearchParams({stopId, arriveBy: arriveBy ? 'true' : 'false', n: '80', window: String(20 * 3600), mode: [...RAIL_MODES, 'REGIONAL_RAIL'].join(',')});
       if (time) params.set('time', time);
-      const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params);
+      const res = await fetchWithTimeout('https://api.transitous.org/api/v6/stoptimes?' + params);
       if (!res.ok) return null;
       const data = await res.json();
       return (data.stopTimes || []).find(s => s.tripId === tripId) || null;
@@ -1701,7 +1798,7 @@ async function resolveCancelledSegment(t) {
 // the background, not on every poll.
 async function resolveDynamicRouteEndpoints(t) {
   try {
-    const res = await fetch('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(t.tripId));
+    const res = await fetchWithTimeout('https://api.transitous.org/api/v6/trip?tripId=' + encodeURIComponent(t.tripId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const leg = data.legs?.[0];
@@ -1715,6 +1812,13 @@ async function resolveDynamicRouteEndpoints(t) {
     const {stops: extStops, backExtended, fwdExtended} = await extendSplitLegStops(rawStops, t.tripId, t.type, numKey(t.id));
     let trueFrom = cleanStationName(extStops[0]?.name), trueTo = cleanStationName(extStops[extStops.length - 1]?.name);
     if (!trueFrom || !trueTo || trueFrom === trueTo || isNamelessHbf(trueFrom) || isNamelessHbf(trueTo)) return;
+    // Same wrong-terminus-name tell as fetchZuglaufStops (see its comment,
+    // "IC 486" case) — a resolved endpoint that's actually the name of an
+    // earlier/later stop on the SAME route is a stale/mislabeled name, not
+    // a genuinely shorter route. Bail out entirely here rather than partially
+    // correcting one side, since this function only widens both from/to
+    // together further down.
+    if (extStops.slice(0, -1).some(s => samePlaceLoose(s.name, trueTo)) || extStops.slice(1).some(s => samePlaceLoose(s.name, trueFrom))) return;
     const live = TRAINS.find(x => x._id === t._id);
     if (!live || live.tripId !== t.tripId || live.status === 'cancelled') return;
     // "Abfahrt HH:MM Uhr" in the status column means departure from the
@@ -1785,7 +1889,7 @@ async function resolveDynamicRouteEndpoints(t) {
 async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName, dayOffset = 0) {
   if (!VIAGGIATRENO_PROXY_BASE) return null;
   try {
-    const res = await fetch(`${VIAGGIATRENO_PROXY_BASE}/numero?numero=${encodeURIComponent(numeroTreno)}`);
+    const res = await fetchWithTimeout(`${VIAGGIATRENO_PROXY_BASE}/numero?numero=${encodeURIComponent(numeroTreno)}`, {}, 8000);
     if (!res.ok) return null;
     const text = await res.text();
     if (!text) return null;
@@ -1878,7 +1982,7 @@ function buildZuglaufTable(stops) {
   const straddlesCancellation = nowIdx > 0 && nowIdx < rows.length
     && (stops[nowIdx - 1]?.cancelled || stops[nowIdx]?.cancelled);
   if (nowIdx > 0 && nowIdx < rows.length && !straddlesCancellation) {
-    rows.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="3"><span class="now-marker-line"></span><span class="now-marker-label">JETZT</span><span class="now-marker-line"></span></td></tr>`);
+    rows.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="3"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT</span><span class="now-marker-line"></span></div></td></tr>`);
   }
   return `<table class="zuglauf-table">
     <thead><tr><th>Halt</th><th>An</th><th>Ab</th></tr></thead>
@@ -2116,23 +2220,41 @@ function linkReplacementTrains() {
 // metres away, not "Basel Bad Bf" itself. Name-match must be checked first;
 // importance is only the tiebreaker among equally-good name matches.
 // Domodossola (in Italy) is the one legitimate no-CH-match exception.
+// Same station name gets looked up repeatedly across completely different
+// trains' extend/resolve attempts within the same poll cycle (confirmed
+// live: "Zürich HB" geocoded 7 times back-to-back opening a single
+// Zuglauf, since several other trains sharing that endpoint were each
+// independently resolving their own route in the background at the same
+// moment) — a real, measurable contributor to slow loading, and pure
+// waste since a station's geocoded ID never changes mid-session. Cached
+// by the returned PROMISE (not just the resolved value) so concurrent
+// callers share one in-flight request instead of each firing their own;
+// a failure is evicted immediately so a later call can retry rather than
+// being locked out by one transient blip for the rest of the session.
+const geocodeCache = new Map();
 async function geocodeStation(name) {
-  const res = await fetch('https://api.transitous.org/api/v1/geocode?text=' + encodeURIComponent(name) + '&numResults=8');
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const list = await res.json();
-  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const target = norm(name);
-  const stops = (list || []).filter(x => x.type === 'STOP');
-  // Tiered so "Domodossola" prefers "Domodossola (I)" / plain "DOMODOSSOLA"
-  // over an importance-heavier but wrong "Milano Domodossola" (a Milan
-  // metro stop whose name merely contains "Domodossola" as a suffix).
-  const exact = stops.filter(x => norm(x.name) === target);
-  const prefixed = stops.filter(x => norm(x.name).startsWith(target));
-  const loose = stops.filter(x => norm(x.name).includes(target) || target.includes(norm(x.name)));
-  const pool = exact.length ? exact : prefixed.length ? prefixed : loose.length ? loose : stops;
-  const chPool = pool.filter(x => x.country === 'CH');
-  const pick = (chPool.length ? chPool : pool).sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
-  return pick?.id || null;
+  if (geocodeCache.has(name)) return geocodeCache.get(name);
+  const promise = (async () => {
+    const res = await fetchWithTimeout('https://api.transitous.org/api/v1/geocode?text=' + encodeURIComponent(name) + '&numResults=8');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const target = norm(name);
+    const stops = (list || []).filter(x => x.type === 'STOP');
+    // Tiered so "Domodossola" prefers "Domodossola (I)" / plain "DOMODOSSOLA"
+    // over an importance-heavier but wrong "Milano Domodossola" (a Milan
+    // metro stop whose name merely contains "Domodossola" as a suffix).
+    const exact = stops.filter(x => norm(x.name) === target);
+    const prefixed = stops.filter(x => norm(x.name).startsWith(target));
+    const loose = stops.filter(x => norm(x.name).includes(target) || target.includes(norm(x.name)));
+    const pool = exact.length ? exact : prefixed.length ? prefixed : loose.length ? loose : stops;
+    const chPool = pool.filter(x => x.country === 'CH');
+    const pick = (chPool.length ? chPool : pool).sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+    return pick?.id || null;
+  })();
+  geocodeCache.set(name, promise);
+  promise.catch(() => geocodeCache.delete(name));
+  return promise;
 }
 // Domodossola's geocode results are genuinely ambiguous — a same-named but
 // unrelated "Milano Domodossola" metro stop and multiple differently-fed
@@ -2179,7 +2301,7 @@ async function fetchStopTimes(stopId, extraModes, arriveBy) {
   // to yesterday's occurrence instead. Push the deadline to the edge of our
   // own lookahead horizon so upcoming arrivals are actually included.
   if (arriveBy) params.set('time', new Date(Date.now() + 13 * 3600 * 1000).toISOString());
-  const res = await fetch('https://api.transitous.org/api/v6/stoptimes?' + params.toString());
+  const res = await fetchWithTimeout('https://api.transitous.org/api/v6/stoptimes?' + params.toString());
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
   return data.stopTimes || [];
@@ -2348,7 +2470,7 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno, dayOffset = 0)
   if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
   try {
     const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs(dayOffset)}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 8000); // ViaggiaTreno itself (proxied) tends to be slower than the others — a shorter cap risked false timeouts on otherwise-fine requests
     if (!res.ok) return null;
     const text = await res.text();
     if (!text) return null; // ViaggiaTreno returns an empty body for "no such train today"
@@ -2402,7 +2524,7 @@ async function checkViaggiaTrenoRunsToday(originStationId, numeroTreno, dayOffse
   if (!VIAGGIATRENO_PROXY_BASE || !originStationId) return null;
   try {
     const url = `${VIAGGIATRENO_PROXY_BASE}/andamento?origin=${encodeURIComponent(originStationId)}&numero=${encodeURIComponent(numeroTreno)}&data=${viaggiatrenoMidnightMs(dayOffset)}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 8000); // ViaggiaTreno itself (proxied) tends to be slower than the others — a shorter cap risked false timeouts on otherwise-fine requests
     if (!res.ok) return null;
     const text = await res.text();
     if (!text) return false; // ViaggiaTreno's documented signal for "no such train today"
@@ -2436,7 +2558,7 @@ async function markItalyTrainsNotRunningToday() {
 const CH_SOURCE_STATIONS = BORDER_STATIONS.map(s => s.name).filter(name => name !== 'Domodossola' && !CH_SOURCE_EXCLUDED_NAMES.has(name));
 async function fetchChStationboard(stationName) {
   const url = `https://transport.opendata.ch/v1/stationboard?station=${encodeURIComponent(stationName)}&limit=200&type=departure`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
   return data.stationboard || [];
@@ -2953,6 +3075,9 @@ function startApp() {
   pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
   setInterval(pollOpendata, 120000);       // refresh live delays every 2 min
   setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
+  setInterval(stamp, 1000); // "Stand: HH:MM:SS" ticks every second — it already had second-level
+  // precision, but only updated once a minute, so it visibly "froze" for up to 60s at a time
+  // instead of reading as a live, still-connected clock.
   markItalyTrainsNotRunningToday();        // hide curated EC rows that don't actually run today
 }
 
