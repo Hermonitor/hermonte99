@@ -117,6 +117,23 @@
   .now-marker-line { flex: 1; height: 1px; background: var(--amber); opacity: 0.5; }
   .now-marker-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--amber); white-space: nowrap; }
 
+  /* Loading state: static skeleton rows sit in the HTML from first paint
+     (no JS needed to show them — covers the moment before startApp() has
+     even run), and #train-tbody fades the real rows in once they land,
+     instead of the content just popping into place. */
+  @keyframes skeleton-shimmer { 0% { background-position: -200px 0; } 100% { background-position: calc(200px + 100%) 0; } }
+  .skeleton-cell { display: inline-block; height: 11px; border-radius: 3px; background: var(--bg3) linear-gradient(90deg, var(--bg3) 0%, oklch(28% 0.010 240) 50%, var(--bg3) 100%); background-size: 200px 100%; animation: skeleton-shimmer 1.4s ease-in-out infinite; }
+  tr.skeleton-row { cursor: default; }
+  tr.skeleton-row:hover { background: transparent; }
+  tr.skeleton-row .skeleton-cell.w-badge { width: 34px; height: 16px; border-radius: 2px; }
+  tr.skeleton-row .skeleton-cell.w-num { width: 32px; margin-left: 6px; }
+  tr.skeleton-row .skeleton-cell.w-full { width: 85%; }
+  tr.skeleton-row .skeleton-cell.w-mid { width: 60%; }
+  tr.skeleton-row .skeleton-cell.w-short { width: 45px; }
+  tr.skeleton-row .skeleton-cell.w-badge2 { width: 90px; height: 18px; border-radius: 2px; }
+  #train-tbody.data-loaded { animation: table-fade-in 0.35s ease-out; }
+  @keyframes table-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
   .td-train { font-family: var(--font-display); font-size: 15px; font-weight: 600; }
   .zuglauf-toggle { font-family: var(--font-body); font-size: 10px; font-weight: 400; color: var(--text2); cursor: pointer; margin-top: 1px; }
   .zuglauf-toggle:hover { color: var(--amber); text-decoration: underline; }
@@ -129,11 +146,21 @@
      ("Como S. Giovanni") wrap onto a second line instead of ellipsing. */
   .zuglauf-table th:first-child, .zuglauf-table td:first-child { width: 52%; white-space: normal; }
   .zuglauf-table th:not(:first-child), .zuglauf-table td:not(:first-child) { width: 24%; }
+  /* The JETZT divider's single colspan="3" cell is still :first-child of
+     its row (its only cell) — without this it'd inherit the 52% name-
+     column width above and only span half the table. */
+  .zuglauf-table tr.now-marker td:first-child { width: auto; white-space: nowrap; }
   .td-source { color: var(--text2); font-size: 10px; font-family: var(--font-mono); }
   .td-time { font-family: var(--font-mono); font-size: 13px; }
   .td-delay { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
   .td-delta { font-size: 10px; font-weight: 600; }
   .td-empty { color: var(--text2); }
+  /* Forward-projected forecast (see propagateDelayForward): a projection
+     from the last known delay, not a confirmed reading for this specific
+     stop — kept visually distinct (muted + italic) from both a genuine
+     confirmed reading (full colour) and an unconfirmed unknown (plain
+     grey) so it never reads as more certain than it is. */
+  .td-forecast { font-style: italic; opacity: 0.72; }
   .delay-0 { color: var(--green); }
   .delay-low { color: var(--yellow); }
   .delay-high { color: var(--red); }
@@ -359,7 +386,18 @@
             <th data-col="delay">Verspätung ↕</th>
           </tr>
         </thead>
-        <tbody id="train-tbody"></tbody>
+        <tbody id="train-tbody">
+          <!-- Static skeleton rows — present in the HTML itself, so they
+               show immediately on first paint (no JS execution needed).
+               renderTable() replaces this innerHTML with real rows on its
+               first run and adds .data-loaded for the fade-in. -->
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+        </tbody>
       </table>
       <div class="empty-state" id="empty-state" style="display:none">
         <h3>Keine Züge gefunden</h3>
@@ -411,6 +449,11 @@ function cleanStationName(name) {
   if (!name) return name;
   let s = name
     .replace(/^S\+U\s+/, '')
+    // Berlin's VBB feed names an S-Bahn platform "S Südkreuz Bhf (Berlin)"
+    // (city trails in parens, "Bhf"/an optional "/Ostseite" side-suffix in
+    // the middle) — confirmed live on ICE 277/279's own origin. Reorders
+    // to this app's normal "City Name" convention.
+    .replace(/^S\s+(.+?)\s+Bhf(?:\/[^\s(]+)?\s*\(([^)]+)\)$/i, '$2 $1')
     .replace(/\bHauptbahnhof\b/g, 'Hbf')
     .replace(/\s*\((oben|unten|tief)\)\s*$/i, '')
     .replace(/\s+Hall\s+\d+(\s*-\s*\d+)?$/i, '') // "Paris Gare de Lyon Hall 1 - 2" -> "Paris Gare de Lyon"
@@ -863,7 +906,18 @@ function renderKPIs() {
 function renderTable() {
   const tbody = document.getElementById('train-tbody');
   const empty = document.getElementById('empty-state');
-  if (!state.filtered.length) { tbody.innerHTML=''; empty.style.display=''; return; }
+  // The very first render replaces the static skeleton-row markup that's
+  // been sitting in the HTML since page load — .data-loaded triggers a
+  // one-time fade-in instead of the real rows just popping in. Checking
+  // for the class rather than a separate flag means a poll that later
+  // finds the window empty doesn't re-trigger it.
+  const firstRealRender = !tbody.classList.contains('data-loaded');
+  if (!state.filtered.length) {
+    tbody.innerHTML = '';
+    tbody.classList.add('data-loaded');
+    empty.style.display = '';
+    return;
+  }
   empty.style.display = 'none';
 
   const now = nowMin();
@@ -903,6 +957,7 @@ function renderTable() {
   }
 
   tbody.innerHTML = rowsHtml.join('');
+  if (firstRealRender) tbody.classList.add('data-loaded');
 
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
     row.addEventListener('click', () => toggleZuglaufPanel(parseInt(row.dataset.id)));
@@ -1366,6 +1421,7 @@ async function fetchZuglaufStops(train) {
 
     let finalStops = dedupeRouteStops(stops);
     finalStops = propagateDelayBackward(finalStops);
+    finalStops = propagateDelayForward(finalStops);
     // Whatever this fetch just discovered about the route's true first/
     // last stop is at least as reliable as — often more reliable than —
     // whatever resolveDynamicRouteEndpoints separately determined for the
@@ -1444,6 +1500,38 @@ function propagateDelayBackward(stops) {
       s.arrival = s.scheduledArrival ? new Date(new Date(s.scheduledArrival).getTime() + delayMs).toISOString() : null;
       s.departure = s.scheduledDeparture ? new Date(new Date(s.scheduledDeparture).getTime() + delayMs).toISOString() : null;
       s.liveConfirmed = true;
+    }
+  }
+  return stops;
+}
+// The forward counterpart: a stop still AHEAD of the train (not yet
+// reached) generally has no live reading at all from any source — there's
+// nothing to confirm yet. Projecting the most recently known delay forward
+// as a "Prognose" gives a useful at-a-glance forecast for the rest of the
+// journey instead of leaving every future stop blank, per explicit
+// request. Marked with its own `forecast` flag (never `liveConfirmed`) so
+// buildZuglaufCell can render it as a clearly-distinguished projection —
+// this must never look identical to an actual confirmed reading, since
+// unlike propagateDelayBackward's gap-filling (about a stop that already
+// happened), this is a genuine guess about the future that can still
+// change. Runs after propagateDelayBackward so a backward-filled stop
+// still counts as a valid anchor to project forward from.
+function propagateDelayForward(stops) {
+  let knownDelay = null;
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    if (s.cancelled) { knownDelay = null; continue; }
+    if (s.liveConfirmed) {
+      const sched = s.departure ? s.scheduledDeparture : s.scheduledArrival;
+      const actual = s.departure || s.arrival;
+      if (sched && actual) knownDelay = Math.round((new Date(actual) - new Date(sched)) / 60000);
+      continue;
+    }
+    if (knownDelay != null && (s.scheduledArrival || s.scheduledDeparture)) {
+      const delayMs = knownDelay * 60000;
+      s.arrival = s.scheduledArrival ? new Date(new Date(s.scheduledArrival).getTime() + delayMs).toISOString() : null;
+      s.departure = s.scheduledDeparture ? new Date(new Date(s.scheduledDeparture).getTime() + delayMs).toISOString() : null;
+      s.forecast = true;
     }
   }
   return stops;
@@ -1690,38 +1778,61 @@ async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName, dayOffset =
 // The SCHEDULED time is always what's shown — the point isn't to compute
 // and display a separate "effective" instant, it's to show the timetabled
 // time with a "+x" delay appended once it's known (matching the main
-// table's own Status-column convention). A still-upcoming stop shows the
-// scheduled time in grey, never coloured green — a not-yet-departed stop
-// isn't "on time" yet, it just hasn't happened, and colouring it green
-// reads as a confirmation that hasn't actually occurred (spotted: a stop
-// hours away already showing green because its current prognosis happened
-// to be delay:0). Colour (green/yellow/red, same thresholds as the main
-// table's Verspätung column) only ever applies once the stop is actually
-// in the past and confirmed.
-function buildZuglaufCell(schedIso, effIso, cancelled) {
+// table's own Status-column convention). A not-yet-departed stop with a
+// genuinely CONFIRMED reading is never coloured green as if it already
+// happened — a not-yet-departed stop isn't "on time" yet, it just hasn't
+// happened, and colouring it green reads as a confirmation that hasn't
+// actually occurred (spotted: a stop hours away already showing green
+// because its current prognosis happened to be delay:0). Full colour
+// (green/yellow/red, same thresholds as the main table's Verspätung
+// column) only ever applies to an actually-confirmed reading. A forward-
+// projected forecast (see propagateDelayForward — `forecast: true`, set
+// on every stop this train hasn't reached yet) is shown distinctly: the
+// "~" prefix and muted/italic style make clear at a glance that it's a
+// projection from the last known delay, not a live reading for that stop.
+function buildZuglaufCell(schedIso, effIso, cancelled, forecast) {
   const sollStr = hhmmZurich(schedIso) || '–';
   if (!schedIso) return '<span class="td-empty">–</span>';
   if (cancelled) return `<span class="delay-high">Ausfall</span>`;
-  const isPast = new Date(schedIso).getTime() < Date.now();
-  if (!isPast || !effIso) {
-    // Not yet due, or due but not yet live-confirmed — grey either way.
+  if (!effIso) {
+    // No confirmed reading and nothing to project from either — grey.
     return `<span class="td-empty">${sollStr}</span>`;
   }
   const delayMin = Math.round((new Date(effIso) - new Date(schedIso)) / 60000);
   const dCls = delayMin <= 0 ? 'delay-0' : delayMin <= 5 ? 'delay-low' : 'delay-high';
+  if (forecast) {
+    const dBadge = delayMin === 0 ? '' : ` <span class="td-delta td-forecast ${dCls}">~${delayMin > 0 ? '+' : ''}${delayMin}</span>`;
+    return `<span class="td-forecast">${sollStr}</span>${dBadge}`;
+  }
   const dBadge = delayMin === 0 ? '' : ` <span class="td-delta ${dCls}">${delayMin > 0 ? '+' : ''}${delayMin}</span>`;
   return `<span class="${dCls}">${sollStr}</span>${dBadge}`;
 }
 function buildZuglaufTable(stops) {
+  // Where the train currently is: the boundary between the last stop
+  // whose own scheduled time has passed and the next one still ahead —
+  // same "JETZT" divider already used in the main overview table, reused
+  // here (same CSS classes) so a glance at the Zuglauf shows current
+  // position at a glance, not just times. Skipped when the whole route is
+  // still ahead (train hasn't left the origin yet) or entirely in the past
+  // (already arrived) — there's no meaningful boundary to mark then, same
+  // rule the overview table's own marker already follows.
+  const nowMs = Date.now();
+  const nowIdx = stops.findIndex(s => {
+    const t = s.scheduledDeparture || s.scheduledArrival;
+    return t && new Date(t).getTime() >= nowMs;
+  });
   const rows = stops.map(s => {
     const name = cleanStationName(s.name);
-    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, s.cancelled);
-    const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled);
+    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, s.cancelled, !!s.forecast);
+    const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled, !!s.forecast);
     return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
-  }).join('');
+  });
+  if (nowIdx > 0 && nowIdx < rows.length) {
+    rows.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="3"><span class="now-marker-line"></span><span class="now-marker-label">JETZT</span><span class="now-marker-line"></span></td></tr>`);
+  }
   return `<table class="zuglauf-table">
     <thead><tr><th>Halt</th><th>An</th><th>Ab</th></tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${rows.join('')}</tbody>
   </table>`;
 }
 
