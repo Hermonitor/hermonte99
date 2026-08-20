@@ -432,11 +432,30 @@
 // blip produced 29 failed requests and took over 20 seconds to finally
 // render. Capping each individual attempt at a few seconds means a bad
 // patch is still slow, but bounded — not "sometimes just hangs".
-async function fetchWithTimeout(url, options, timeoutMs = 5000) {
+// A second, real problem sits on top of the one above: transitous.org's own
+// requests occasionally fail outright — not slowly, but immediately, thrown
+// as a network error (Chrome reports these as "blocked by CORS policy",
+// which reads like a config problem but isn't one: transitous.org's CORS
+// headers ARE present on the very next attempt at the exact same URL — this
+// is a transient connectivity blip on their end being misreported by the
+// browser, not a persistent misconfiguration). Confirmed live on
+// hermonitor.ch: a burst of these across geocode/stoptimes calls right
+// after page load, then 5/5 immediate retries of the same failing URL all
+// succeeded. Without a retry, EVERY per-stop live lookup that happened to
+// land in such a blip silently falls back to schedule-only data for that
+// stop — a systemic contributor to "realtime data only partially shown"
+// that isn't specific to any one train or axis. One retry after a short
+// pause is enough to ride out a blip without meaningfully compounding the
+// worst-case latency this function was already built to cap.
+async function fetchWithTimeout(url, options, timeoutMs = 5000, _retried = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {...options, signal: controller.signal});
+  } catch (e) {
+    if (_retried || controller.signal.aborted) throw e; // don't retry a genuine timeout — that's not a blip
+    await new Promise(r => setTimeout(r, 300));
+    return await fetchWithTimeout(url, options, timeoutMs, true);
   } finally {
     clearTimeout(timer);
   }
@@ -1539,6 +1558,19 @@ async function fetchZuglaufStops(train) {
       let rowChanged = false;
       if (trueFrom && !isNamelessHbf(trueFrom) && !fromDuplicatesLaterStop && trueFrom !== train.from) { train.from = trueFrom; rowChanged = true; }
       if (trueTo && !isNamelessHbf(trueTo) && !toDuplicatesEarlierStop && trueTo !== train.to) { train.to = trueTo; rowChanged = true; }
+      // Same "feed the discovery back" rule as from/to above, but for the
+      // overview's Abfahrt column — resolveDynamicRouteEndpoints already
+      // does this for itself, but this fetch's own finalStops (built with
+      // the CH-source/Transitous/ViaggiaTreno enrichment layered on top of
+      // extendSplitLegStops) is at least as reliable and runs independently
+      // of whether that background resolution happened to land on the
+      // right answer yet (confirmed live: TER 96121 kept showing "13:50",
+      // the Basel SBB border-crossing time, as its Abfahrt instead of
+      // Mulhouse's real 13:19 until the background resolver's own retry
+      // caught up — this closes the same gap immediately whenever the user
+      // opens the Zuglauf).
+      const trueDep = hhmmZurich(finalStops[0].scheduledDeparture);
+      if (trueDep && !fromDuplicatesLaterStop && trueDep !== train.dep) { train.dep = trueDep; rowChanged = true; }
       if (rowChanged) applyFilters();
       // Relabel the rejected terminus row itself too — otherwise the
       // Zuglauf TABLE still shows the wrong duplicate name on its last row
@@ -1970,7 +2002,20 @@ function buildZuglaufTable(stops) {
   });
   const rows = stops.map(s => {
     const name = cleanStationName(s.name);
-    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, s.cancelled, !!s.forecast);
+    // A single shared `cancelled` flag on the stop conflates two genuinely
+    // different situations: a stop the train never reaches at all (both An
+    // AND Ab are meaningless — Ausfall/Ausfall), versus a stop where the
+    // train DOES arrive but the onward journey from there is what's
+    // cancelled (confirmed live: ICE 103 truncated to Hamburg→Basel Bad Bf —
+    // Transitous flags Basel Bad Bf's whole `place` cancelled once the
+    // remainder of the trip is cancelled, but still reports a genuine
+    // arrival reading there). Arrival and departure must be judged
+    // independently: An is only Ausfall when there's truly no confirmed
+    // arrival; Ab stays Ausfall whenever the stop is flagged cancelled,
+    // since "arrives but doesn't continue" is exactly the terminating-early
+    // case this is meant to show.
+    const cancelledArrival = s.cancelled && !s.arrival;
+    const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, cancelledArrival, !!s.forecast);
     const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled, !!s.forecast);
     return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
   });
@@ -2971,11 +3016,25 @@ async function pollOpendata() {
     // that caused the ICE 107 regression, plus the ViaggiaTreno fallback
     // for the Italy axis) — so every row, curated or not, is now kept in
     // sync with what's actually running today instead of trusting a
-    // static, possibly stale guess. Still a once-per-tripId background
-    // correction, not every poll.
+    // static, possibly stale guess.
+    // A single attempt right after a train is first discovered can itself
+    // land on stale data — confirmed live: TER 96121's /trip response was
+    // still split/truncated (own scheduledDeparture missing) the moment it
+    // was first polled, resolving "dep" to the Basel SBB border-crossing
+    // time (13:50) instead of Mulhouse's real 13:19; re-running the exact
+    // same fetch minutes later against the by-then-consolidated feed
+    // resolved it correctly. A hard "once ever" guard then locks in that
+    // wrong first answer permanently, with no way for it to self-correct.
+    // Retried a few times (once per poll) per tripId instead of forever, to
+    // give the feed time to catch up without costing an unbounded number of
+    // extra fetches per poll for trips that were already resolved correctly
+    // the first time (the common case).
+    const ROUTE_RESOLVE_MAX_ATTEMPTS = 4;
     TRAINS.forEach(t => {
-      if (t.status !== 'cancelled' && t.tripId && t._routeFetchedFor !== t.tripId) {
-        t._routeFetchedFor = t.tripId;
+      if (t.status === 'cancelled' || !t.tripId) return;
+      if (t._routeFetchedForTrip !== t.tripId) { t._routeFetchedForTrip = t.tripId; t._routeFetchAttempts = 0; }
+      if (t._routeFetchAttempts < ROUTE_RESOLVE_MAX_ATTEMPTS) {
+        t._routeFetchAttempts++;
         resolveDynamicRouteEndpoints(t);
       }
     });
