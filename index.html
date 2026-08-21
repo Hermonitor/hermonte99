@@ -214,6 +214,65 @@
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
   .empty-state h3 { font-family: var(--font-display); font-size: 24px; margin-bottom: 8px; color: var(--amber-dim); }
 
+  /* ── Leitfaden overlay ──────────────────────────────────────────────── */
+  .leitfaden-btn { font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text2); background: none; text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; transition: all 0.15s; cursor: pointer; }
+  .leitfaden-btn:hover { color: var(--amber); border-color: var(--amber-dim); }
+  .guide-overlay { position: fixed; inset: 0; z-index: 500; display: none; background: oklch(10% 0.006 240 / 0.72); backdrop-filter: blur(2px); padding: 40px 20px; overflow-y: auto; }
+  .guide-overlay.open { display: block; }
+  .guide-panel { max-width: 760px; margin: 0 auto; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 30px 80px oklch(0% 0 0 / 0.5); position: relative; padding: 40px 40px 32px; }
+  .guide-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; padding: 6px 10px; line-height: 1; }
+  .guide-close:hover { color: var(--text); }
+  .guide-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber-dim); display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .guide-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .guide-panel h1 { font-family: var(--font-display); font-size: 34px; font-weight: 700; color: var(--text); letter-spacing: 0.01em; margin: 0 0 8px; }
+  .guide-panel .guide-sub { color: var(--text2); font-size: 14px; max-width: 56ch; line-height: 1.5; margin-bottom: 24px; }
+  .guide-callout { border: 1px solid oklch(45% 0.08 75 / 0.4); border-left: 3px solid var(--amber); background: oklch(22% 0.05 75 / 0.5); border-radius: 4px; padding: 16px 18px; margin: 20px 0; }
+  .guide-callout .guide-label { font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); display: block; margin-bottom: 8px; }
+  .guide-callout p { font-size: 13px; line-height: 1.6; color: var(--text); margin: 0 0 8px; }
+  .guide-callout p:last-child { margin-bottom: 0; }
+  .guide-panel section { padding: 26px 0; border-bottom: 1px solid var(--border); }
+  .guide-panel section:last-of-type { border-bottom: none; padding-bottom: 4px; }
+  .guide-panel h2 { font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--text); margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; }
+  .guide-panel h2 .num { font-family: var(--font-mono); font-size: 12px; color: var(--text2); font-weight: 400; }
+  .guide-panel h3 { font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--text); margin: 20px 0 8px; }
+  .guide-panel p { font-size: 13.5px; line-height: 1.65; color: var(--text2); margin: 0 0 12px; max-width: 62ch; }
+  .guide-panel p b, .guide-panel p strong { color: var(--text); font-weight: 600; }
+  .guide-panel code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg3); border: 1px solid var(--border); padding: 0.05em 0.4em; border-radius: 3px; color: var(--amber); }
+  .guide-source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 4px; }
+  @media (max-width: 640px) { .guide-source-grid { grid-template-columns: 1fr; } }
+  .guide-source-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px 16px; }
+  .guide-source-card .src-name { font-family: var(--font-mono); font-weight: 500; font-size: 12.5px; color: var(--text); display: block; }
+  .guide-source-card .src-role { font-family: var(--font-display); font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--amber-dim); display: block; margin: 3px 0 8px; }
+  .guide-source-card p { font-size: 12px; margin: 0; }
+  .guide-table { width: 100%; border-collapse: collapse; margin: 14px 0 4px; font-size: 13px; }
+  .guide-table th, .guide-table td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .guide-table thead th { font-family: var(--font-display); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text2); background: var(--bg3); }
+  .guide-table td { color: var(--text2); }
+  .guide-table tbody tr:last-child td { border-bottom: none; }
+  .guide-pill { display: inline-block; font-family: var(--font-mono); font-size: 11px; padding: 2px 9px; border-radius: 20px; background: oklch(22% 0.06 75); color: var(--amber); white-space: nowrap; }
+  .guide-handoff { display: flex; margin: 18px 0 6px; font-family: var(--font-mono); font-size: 12px; }
+  .guide-handoff .seg { flex: 1; background: var(--bg3); border: 1px solid var(--border); padding: 12px 14px 12px; position: relative; }
+  .guide-handoff .seg:first-child { border-radius: 6px 0 0 6px; }
+  .guide-handoff .seg:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .guide-handoff .seg-label { display: block; font-family: var(--font-display); font-weight: 700; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--blue); margin-bottom: 4px; }
+  .guide-handoff .seg.italy .seg-label { color: var(--green); }
+  .guide-handoff .seg-detail { color: var(--text2); font-size: 11px; line-height: 1.5; }
+  .guide-handoff .arrow { flex: none; width: 30px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); color: var(--text2); font-size: 14px; }
+  .guide-handoff .border-tag { position: absolute; top: -10px; right: 10px; background: var(--amber-dim); color: var(--bg); font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 3px; }
+  @media (max-width: 560px) { .guide-handoff { flex-direction: column; } .guide-handoff .arrow { width: auto; height: 20px; } .guide-handoff .seg:last-child { border-left: 1px solid var(--border); border-top: none; } }
+  .guide-concept { display: grid; grid-template-columns: 150px 1fr; gap: 4px 16px; padding: 12px 0; border-top: 1px solid var(--border); }
+  .guide-concept:first-of-type { border-top: none; }
+  .guide-concept dt { font-family: var(--font-display); font-weight: 600; font-size: 13px; color: var(--text); }
+  .guide-concept dd { margin: 0; font-size: 12.5px; color: var(--text2); }
+  @media (max-width: 560px) { .guide-concept { grid-template-columns: 1fr; } }
+  .guide-limit { display: grid; grid-template-columns: 18px 1fr; gap: 8px; margin-bottom: 12px; }
+  .guide-limit .mark { color: var(--red); font-family: var(--font-display); font-weight: 800; font-size: 15px; line-height: 1.5; }
+  .guide-limit p { margin: 0; font-size: 13px; }
+  .guide-closing { margin-top: 4px; padding: 20px 20px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; }
+  .guide-closing .guide-label { font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); display: block; margin-bottom: 8px; }
+  .guide-closing p { color: var(--text2); font-size: 13px; margin: 0; }
+  .guide-footer { margin-top: 24px; font-family: var(--font-mono); font-size: 10px; color: var(--text2); opacity: 0.7; }
+
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -284,6 +343,7 @@
     <div class="conn-dot" id="conn-dot"></div>
     <span id="conn-label">Verbinde…</span>
   </div>
+  <button class="leitfaden-btn" id="leitfaden-btn" type="button">Leitfaden</button>
   <a class="feedback-btn" href="https://www.google.com" target="_blank" rel="noopener">Feedback</a>
 </header>
 
@@ -418,6 +478,112 @@
 <div class="detail-panel" id="detail-panel">
   <button class="detail-close" id="detail-close">✕</button>
   <div id="detail-content"></div>
+</div>
+
+<div class="guide-overlay" id="guide-overlay">
+  <div class="guide-panel">
+    <button class="guide-close" id="guide-close">✕</button>
+    <div class="guide-eyebrow"><span class="dot"></span>Interner Leitfaden · nicht für Weitergabe an Dritte</div>
+    <h1>Hermonitor verstehen</h1>
+    <p class="guide-sub">Wie das Dashboard grenzüberschreitende Zugverbindungen live verfolgt, woher die Daten kommen — und wo seine Grenzen liegen.</p>
+
+    <div class="guide-callout">
+      <span class="guide-label">⚠ Bevor du dich darauf verlässt</span>
+      <p>Hermonitor ist ein <b>Hilfsmittel zur groben Übersicht</b>, keine offizielle Auskunft. Zeiten, Verspätungsprognosen und Anschlüsse können <b>falsch oder veraltet</b> sein — insbesondere bei Zügen, die noch nicht gestartet sind, oder unmittelbar an Landesgrenzen.</p>
+      <p>Für Reiseentscheidungen, Anschlüsse oder Kundenauskünfte <b>immer zusätzlich die offizielle Quelle prüfen</b>: SBB (opendata.ch / sbb.ch), DB Navigator, Trenitalia / ViaggiaTreno, ÖBB oder die jeweilige Bahn-App direkt.</p>
+    </div>
+
+    <section>
+      <h2><span class="num">01</span>Was Hermonitor macht</h2>
+      <p>Hermonitor zeigt in einer einzigen Tabelle, welche internationalen Fernzüge (ICE, TGV, EC, IC, RJX, NJ und ausgewählte RE/TER) die Schweizer Grenze <b>gerade oder demnächst</b> überqueren — mit Verspätung, Status und einem aufklappbaren Zuglauf pro Zug. Ziel ist ein schneller Überblick über die Lage an allen Grenzübergängen gleichzeitig, ohne mehrere Bahn-Apps öffnen zu müssen.</p>
+      <p>Die Seite ist <b>eine einzelne HTML-Datei</b> ohne eigenes Backend. Alles läuft im Browser; die einzige Ausnahme ist ein kleiner Proxy (auf Vercel gehostet), der ausschliesslich dazu dient, Trenitalias ViaggiaTreno- und ÖBB-Daten browserseitig abrufbar zu machen (Abschnitt 2) — beide APIs erlauben keine direkten Anfragen von fremden Domains.</p>
+    </section>
+
+    <section>
+      <h2><span class="num">02</span>Woher die Daten kommen</h2>
+      <p>Vier unabhängige, kostenlose Quellen werden kombiniert. Keine davon deckt alles ab — deshalb die Kombination.</p>
+      <div class="guide-source-grid">
+        <div class="guide-source-card">
+          <span class="src-name">transitous.org</span>
+          <span class="src-role">Grundgerüst</span>
+          <p>Freier Routingdienst (MOTIS) auf GTFS-Basis aus CH/DE/FR/AT/IT. Liefert Fahrplan, Halte und Zuglauf für praktisch jede Verbindung — Echtzeitdaten sind ausserhalb der Schweiz aber oft dünn. Trägt weiterhin die DB-Achse (Basel Bad Bf/Schaffhausen/St. Margrethen) und die SNCF-Achse (TGV Lyria via Basel SBB/Vallorbe/Genève) — siehe Kasten unten.</p>
+        </div>
+        <div class="guide-source-card">
+          <span class="src-name">opendata.ch</span>
+          <span class="src-role">Schweizer Netz</span>
+          <p>Öffentlicher Wrapper um die SBB-«Ist-Daten». Innerhalb der Schweiz die zuverlässigste Quelle für Verspätungen und Ausfälle — wird dort immer bevorzugt.</p>
+        </div>
+        <div class="guide-source-card">
+          <span class="src-name">ViaggiaTreno</span>
+          <span class="src-role">Italienisches Netz</span>
+          <p>Trenitalias eigenes Live-Tracking. Einzige verlässliche Quelle für den italienischen Streckenteil Richtung/ab Chiasso und Domodossola.</p>
+        </div>
+        <div class="guide-source-card">
+          <span class="src-name">fahrplan.oebb.at</span>
+          <span class="src-role">Österreichisches Netz</span>
+          <p>ÖBB-eigenes Live-Tracking über den Bahnhof Feldkirch, die letzte AT-Station vor der Grenze. Einzige verlässliche Quelle für RJX/Nightjet Richtung/ab Buchs SG, inklusive vollem Zuglauf.</p>
+        </div>
+      </div>
+      <div class="guide-callout" style="margin-top:20px">
+        <span class="guide-label">Geprüft, aber nicht umsetzbar: DB und SNCF direkt</span>
+        <p>bahn.de und sncf-voyageurs.com haben beide eine vergleichbar gute interne API wie ÖBB — beide sind aber hinter hartem Bot-Schutz (Akamai bzw. DataDome), der auch server-seitige Proxy-Anfragen blockiert, nicht nur Browser-Scraping. Bestätigt live: bahn.de antwortet mit <code>403 OPS_BLOCKED</code>, sncf-voyageurs.com leitet auf ein Captcha um — beides unabhängig von Headern oder Cookies. Beide Achsen bleiben deshalb auf transitous.org/opendata.ch wie zuvor.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>Wer hat wo das letzte Wort</h2>
+      <p>Die vier Quellen widersprechen sich gelegentlich. Grundregel: <b>die räumlich zuständige Quelle gewinnt</b> — nicht die zuerst antwortende.</p>
+      <table class="guide-table">
+        <thead><tr><th>Streckenabschnitt</th><th>Bevorzugte Quelle</th><th>Fallback</th></tr></thead>
+        <tbody>
+          <tr><td>Schweizer Netz (alle Grenzstationen)</td><td><span class="guide-pill">opendata.ch</span></td><td>transitous.org</td></tr>
+          <tr><td>Deutschland / Frankreich, jenseits der Grenze (DB/SNCF)</td><td><span class="guide-pill">transitous.org</span></td><td>—</td></tr>
+          <tr><td>Österreich, Achse Feldkirch / Buchs SG (RJX/Nightjet)</td><td><span class="guide-pill">fahrplan.oebb.at</span></td><td>—</td></tr>
+          <tr><td>Italien, Achse Chiasso / Domodossola</td><td><span class="guide-pill">ViaggiaTreno</span></td><td>transitous.org</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Grenzübergang Chiasso / Domodossola im Detail</h3>
+      <p>Weil hier zwei Quellen aufeinandertreffen, ist die Übergabestelle genau festgelegt — abhängig von der Fahrtrichtung:</p>
+      <div class="guide-handoff">
+        <div class="seg"><span class="border-tag">CH → IT</span><span class="seg-label">Schweiz</span><span class="seg-detail">opendata.ch bis inkl. Ankunft an der Grenze</span></div>
+        <div class="arrow">→</div>
+        <div class="seg italy"><span class="seg-label">Italien</span><span class="seg-detail">ViaggiaTreno ab Abfahrt an der Grenze bis Zielbahnhof</span></div>
+      </div>
+      <div class="guide-handoff">
+        <div class="seg italy"><span class="border-tag">IT → CH</span><span class="seg-label">Italien</span><span class="seg-detail">ViaggiaTreno bis inkl. Ankunft an der Grenze</span></div>
+        <div class="arrow">→</div>
+        <div class="seg"><span class="seg-label">Schweiz</span><span class="seg-detail">opendata.ch ab Abfahrt an der Grenze bis Zielbahnhof</span></div>
+      </div>
+      <p style="margin-top:14px">Domodossola liegt geografisch auf italienischem Boden, wird aber bewusst wie ein Schweizer Bahnhof behandelt — SBB führt dort tatsächlich eigene Echtzeitdaten. Chiasso liegt ohnehin auf Schweizer Boden. In beiden Fällen bleibt die zuletzt bekannte Verspätung als Mindestwert bestehen, bis die andere Quelle etwas Genaueres meldet — ein Zug wird also nie plötzlich «pünktlich», nur weil die Zuständigkeit gerade gewechselt hat.</p>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>Begriffe auf der Oberfläche</h2>
+      <dl>
+        <div class="guide-concept"><dt>Die «Jetzt»-Linie</dt><dd>Markiert in Übersicht und Zuglauf, wo ein Zug sich zeitlich gerade befindet — mit live mitlaufender Sekundenanzeige. Erscheint nicht, wenn der Abschnitt bereits vorbei oder noch nicht erreicht ist.</dd></div>
+        <div class="guide-concept"><dt>Bestätigt vs. Prognose</dt><dd>Eine normale Zeit ist von einer Quelle live bestätigt. Ein blasser, kursiver Wert mit «~» ist aus der letzten bekannten Verspätung hochgerechnet, weil dieser Halt selbst noch nicht erreicht wurde.</dd></div>
+        <div class="guide-concept"><dt>An / Ab bei Ausfällen</dt><dd>Erreicht ein Zug einen Halt noch, fällt aber ab dort aus, zeigt «An» weiterhin die echte Ankunftszeit — nur «Ab» wird als Ausfall markiert. Beide Felder gleichzeitig heisst: der Halt wurde nie erreicht.</dd></div>
+        <div class="guide-concept"><dt>Kuratiert vs. live entdeckt</dt><dd>Ein Teil der Züge ist von Hand als wiederkehrende Linie hinterlegt. Alles andere wird automatisch erkannt, sobald es an einer Grenzstation live gemeldet wird — anfangs eine erste Schätzung, die sich in den ersten Minuten noch präzisiert.</dd></div>
+        <div class="guide-concept"><dt>«Stand» unten links</dt><dd>Zeigt, wann die Daten zuletzt tatsächlich neu geladen wurden — nicht die aktuelle Uhrzeit. Läuft automatisch alle zwei Minuten; manueller Reload über das Symbol daneben möglich.</dd></div>
+      </dl>
+    </section>
+
+    <section>
+      <h2><span class="num">05</span>Bekannte Grenzen</h2>
+      <p>Keine Bugs im engeren Sinn, sondern strukturelle Einschränkungen der zugrunde liegenden Quellen:</p>
+      <div class="guide-limit"><span class="mark">–</span><p><b>Noch keine Prognose, solange der Zug nicht fährt.</b> ViaggiaTreno und die Schweizer Ist-Daten liefern erst dann eine echte Verspätung, wenn der Zug tatsächlich unterwegs ist.</p></div>
+      <div class="guide-limit"><span class="mark">–</span><p><b>Gelegentliche, kurze Verbindungsaussetzer</b> bei transitous.org können dazu führen, dass ein Halt kurzzeitig ohne Live-Daten dasteht. Ein automatischer Wiederholungsversuch fängt die meisten Fälle ab, nicht alle.</p></div>
+      <div class="guide-limit"><span class="mark">–</span><p><b>Kuratierte Linien fahren nicht garantiert jeden Tag.</b> Bleibt eine Bestätigung über mehrere Umläufe aus, blendet Hermonitor die Zeile automatisch aus — bis dahin kann sie fälschlich als «pünktlich, unbestätigt» erscheinen.</p></div>
+      <div class="guide-limit"><span class="mark">–</span><p><b>Grenznahe Streckenführung ist Heuristik.</b> Start-/Zielbahnhof werden teils aus mehreren, sich widersprechenden Feeds zusammengesetzt — funktioniert meist korrekt, war aber schon Quelle einzelner falscher Angaben, bis sie korrigiert wurden.</p></div>
+    </section>
+
+    <div class="guide-closing">
+      <span class="guide-label">Zum Mitnehmen</span>
+      <p>Hermonitor ersetzt keine offizielle Fahrplan- oder Störungsauskunft. Es zeigt auf einen Blick, wo es an den Grenzen gerade eng wird — nicht die letztgültige Zahl für Kund:innen oder Dispositionsentscheide. Bei Unsicherheit: SBB, DB, Trenitalia bzw. ÖBB direkt konsultieren.</p>
+    </div>
+    <div class="guide-footer">Hermonitor · interner Leitfaden · hermonitor.ch</div>
+  </div>
 </div>
 
 <script>
@@ -1157,12 +1323,18 @@ function zuglaufPanelHeader(t) {
 async function renderZuglaufPanel(t) {
   const content = document.getElementById('detail-content');
   const header = zuglaufPanelHeader(t);
-  if (!t.tripId) {
+  // RJX/NJ crossing at Buchs SG get their entire Zuglauf from the ÖBB
+  // source instead of Transitous's /trip — see fetchOebbZuglaufStops above
+  // for why (same "authoritative source for this axis" rule as Italy/
+  // ViaggiaTreno, just gated on _oebbJid instead of tripId).
+  const usesOebb = (t.type === 'RJX' || t.type === 'NJ') && t.chStation === 'Buchs SG';
+  const ready = usesOebb ? t._oebbJid : t.tripId;
+  if (!ready) {
     content.innerHTML = header + `<div class="zuglauf-msg">Zuglauf nicht verfügbar (noch kein Live-Treffer für diesen Zug).</div>`;
     return;
   }
   content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
-  const stops = await fetchZuglaufStops(t);
+  const stops = usesOebb ? await fetchOebbZuglaufStops(t) : await fetchZuglaufStops(t);
   // The user may have selected a different train (or closed the panel)
   // while this was in flight — don't clobber whatever's showing now.
   if (state.selectedId !== t._id) return;
@@ -2775,6 +2947,137 @@ async function verifyCancellationsAgainstChSource() {
   if (anyChanged) applyFilters();
 }
 
+// ─── ÖBB SOURCE (fahrplan.oebb.at, AT↔CH border via Feldkirch/Buchs SG) ───────
+// Same idea as the ViaggiaTreno block above, for the other land border this
+// dashboard watches with a curated, non-Swiss authoritative source: RJX/NJ
+// trains crossing at Buchs SG all pass through Feldkirch (the last AT
+// station before the border) shortly before/after. fahrplan.oebb.at's own
+// webapp talks to an undocumented same-origin HAFAS v1.95 JSON gateway
+// (POST /gate) with no CORS for foreign origins — proxied server-side (see
+// viaggiatreno-proxy-vercel/api/oebb.js next to this file, same Vercel
+// project as the ViaggiaTreno proxy). Only ever used to enrich the existing
+// curated RJX/NJ@Buchs SG rows from BASE_TRAINS — never to discover new
+// rows — so the "only CH-relevant trains" rule holds automatically: every
+// candidate here already has a Zürich↔ endpoint by construction, and a
+// domestic-Austria bus/S-Bahn/Westbahn service on the same Feldkirch board
+// simply never matches any curated train number.
+//
+// bahn.de (DB) and sncf-voyageurs.com (SNCF) were evaluated the same way
+// and both have clean equivalent APIs — but bahn.de's is behind Akamai Bot
+// Manager (confirmed live: 403 OPS_BLOCKED from this exact Vercel project,
+// even with realistic headers and primed cookies — it needs a
+// browser-computed sensor payload a server can't produce) and
+// sncf-voyageurs.com's is behind DataDome (confirmed live: every proxied
+// call gets redirected to a captcha-delivery.com interstitial regardless of
+// headers/cookies). Both are therefore left on transitous.org/opendata.ch,
+// same as before this change — DB via Basel Bad Bf/Schaffhausen/St.
+// Margrethen, SNCF (TGV Lyria) via Basel SBB/Vallorbe/Genève.
+const OEBB_PROXY_BASE = VIAGGIATRENO_PROXY_BASE; // same Vercel project, /api/oebb
+// jid strings encode category+number inline, e.g.
+// "...#CA#RJX#ZE#19918#ZB#RJX19918#..." — cheaper and just as reliable as a
+// second round-trip to resolve them, since the board response already has
+// this for every row.
+function parseOebbJid(jid) {
+  const m = /#CA#([A-Za-z]+)#ZE#(\d+)#/.exec(jid || '');
+  return m ? { cat: m[1], num: m[2] } : null;
+}
+// fahrplan.oebb.at reports every time as a single calendar date (the "date"
+// field alongside each entry) plus an HHMMSS wall-clock offset that can run
+// past 240000 for a stop reached after midnight (e.g. "260000" = 02:00 the
+// following day) — the standard HAFAS convention for keeping one journey's
+// stops unambiguous under one date without per-stop day bookkeeping.
+// Vienna and Zürich share the exact same UTC offset year-round (same
+// CET/CEST switch dates across the EU), so Zurich's own offset is reused
+// directly — no separate Vienna-specific handling needed.
+function hafasToIso(dateStr, hhmmss) {
+  if (!dateStr || hhmmss == null || hhmmss === '') return null;
+  const y = +dateStr.slice(0, 4), mo = +dateStr.slice(4, 6) - 1, d = +dateStr.slice(6, 8);
+  const n = typeof hhmmss === 'string' ? parseInt(hhmmss, 10) : hhmmss;
+  if (!Number.isFinite(n)) return null;
+  const h = Math.floor(n / 10000), mi = Math.floor((n % 10000) / 100), s = n % 100;
+  const dayOverflow = Math.floor(h / 24);
+  const asUtcGuess = Date.UTC(y, mo, d + dayOverflow, h % 24, mi, s);
+  const zurichWall = new Date(asUtcGuess).toLocaleString('en-US', { timeZone: 'Europe/Zurich', hour12: false });
+  const zurichAsUtc = new Date(zurichWall.replace(',', '') + ' UTC').getTime();
+  const offsetMs = zurichAsUtc - asUtcGuess;
+  return new Date(asUtcGuess - offsetMs).toISOString();
+}
+async function fetchOebbBoard() {
+  try {
+    const res = await fetchWithTimeout(`${OEBB_PROXY_BASE}/oebb?meth=board`, {}, 8000);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.svcResL?.[0]?.res?.jnyL || null;
+  } catch (e) { return null; }
+}
+// Row-level pass, same shape as enrichEcItalyRowsFromViaggiaTreno below —
+// NOT gated on !t.delayKnown, since the Feldkirch board is the authoritative
+// source for this axis and its own reading keeps changing as the train
+// actually runs.
+async function enrichOebbRowsFromFeldkirch() {
+  const candidates = TRAINS.filter(t => (t.type === 'RJX' || t.type === 'NJ') && t.chStation === 'Buchs SG' && inWindow(t));
+  if (!candidates.length) return;
+  const jnyL = await fetchOebbBoard();
+  if (!jnyL) return;
+  let anyChanged = false;
+  candidates.forEach(t => {
+    const num = numKey(t.id);
+    const hit = jnyL.find(jny => {
+      const p = parseOebbJid(jny.jid);
+      return p && p.cat === t.type && p.num === num;
+    });
+    const stb = hit?.stbStop;
+    if (!hit || !stb) return;
+    const cancelled = !!stb.dCncl;
+    if (!stb.dTimeR && !cancelled) return; // schedule-only reading — nothing new to apply yet
+    const schedIso = hafasToIso(hit.date, stb.dTimeS);
+    const delayMin = (!cancelled && stb.dTimeR && schedIso)
+      ? Math.round((new Date(hafasToIso(hit.date, stb.dTimeR)) - new Date(schedIso)) / 60000) : 0;
+    t.delay = delayMin;
+    t.status = cancelled ? 'cancelled' : (delayMin > 5 ? 'delayed' : 'on-time');
+    t.delayKnown = true;
+    t._confirmedDateKey = zurichDateKey(new Date());
+    t._oebbJid = hit.jid; // powers the ÖBB-sourced Zuglauf, see fetchOebbZuglaufStops
+    t.liveSeen = true;
+    anyChanged = true;
+  });
+  if (anyChanged) applyFilters();
+}
+// Full stop-by-stop Zuglauf for an ÖBB-sourced row, straight from
+// JourneyDetails — replaces the Transitous /trip route entirely for these
+// trains (not just the realtime layer), per the same "ÖBB is authoritative
+// for this axis" reasoning as the row-level enrichment above. Converts into
+// the exact stop shape buildZuglaufTable already expects (see
+// fetchZuglaufStops), so the renderer needs no changes at all.
+async function fetchOebbZuglaufStops(train) {
+  if (!train._oebbJid) return null;
+  try {
+    const res = await fetchWithTimeout(`${OEBB_PROXY_BASE}/oebb?meth=journey&jid=${encodeURIComponent(train._oebbJid)}`, {}, 8000);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const svcRes = data.svcResL?.[0]?.res;
+    const journey = svcRes?.journey;
+    const locL = svcRes?.common?.locL;
+    if (!journey?.stopL || !locL) return null;
+    const date = journey.date;
+    return journey.stopL.map(s => {
+      const loc = locL[s.locX];
+      const name = cleanStationName(loc?.name) || loc?.name || '';
+      const scheduledArrival = s.aTimeS != null ? hafasToIso(date, s.aTimeS) : null;
+      const scheduledDeparture = s.dTimeS != null ? hafasToIso(date, s.dTimeS) : null;
+      return {
+        name,
+        scheduledArrival, scheduledDeparture,
+        arrival: s.aTimeR != null ? hafasToIso(date, s.aTimeR) : null,
+        departure: s.dTimeR != null ? hafasToIso(date, s.dTimeR) : null,
+        cancelled: !!(s.aCncl || s.dCncl),
+        liveConfirmed: !!(s.aTimeR != null || s.dTimeR != null),
+        source: 'ÖBB',
+      };
+    });
+  } catch (e) { return null; }
+}
+
 // ViaggiaTreno is the only reliable realtime source for the CH→IT leg of
 // an EC crossing at Chiasso/Domodossola — the Swiss source reliably
 // tracks a train ARRIVING from Italy (confirmed: EC 28's Chiasso arrival
@@ -3150,6 +3453,7 @@ async function pollOpendata() {
 
     verifyCancellationsAgainstChSource();
     enrichEcItalyRowsFromViaggiaTreno();
+    enrichOebbRowsFromFeldkirch();
   } catch (e) {
     opendataOK = false;
     setConn('error');
@@ -3221,6 +3525,17 @@ document.getElementById('reload-btn').addEventListener('click', () => {
 document.getElementById('detail-close').addEventListener('click', () => {
   state.selectedId = null; closeDetail(); renderTable();
 });
+(() => {
+  const overlay = document.getElementById('guide-overlay');
+  const open = () => overlay.classList.add('open');
+  const close = () => overlay.classList.remove('open');
+  document.getElementById('leitfaden-btn').addEventListener('click', open);
+  document.getElementById('guide-close').addEventListener('click', close);
+  // Click on the dimmed backdrop (not the panel itself) closes it too —
+  // same convention as clicking outside any other overlay/modal.
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
 document.querySelectorAll('thead th[data-col]').forEach(th => {
   th.addEventListener('click', () => {
     const colMap = {chTime:'chTime',delay:'delay',to:'to',from:'from'};
