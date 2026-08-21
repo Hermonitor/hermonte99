@@ -911,6 +911,20 @@ function minToHHMM(m) {
   const total = ((m % 1440) + 1440) % 1440;
   return String(Math.floor(total / 60)).padStart(2,'0') + ':' + String(total % 60).padStart(2,'0');
 }
+// The JETZT divider's own clock, seconds included — separate from
+// minToHHMM (minute-granular, used for the row-sorting boundary itself,
+// not display) since the marker is meant to visibly tick as a live clock.
+function nowMarkerClockText() {
+  return new Date().toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+// Updates just the JETZT marker's own clock text once a second — never
+// touches the rest of the table (see the render-time comment above).
+// Silently no-ops when the marker isn't currently in the DOM (train list
+// scrolled past "now" entirely, or between renders).
+function tickNowMarkerClock() {
+  const el = document.getElementById('now-marker-clock');
+  if (el) el.textContent = nowMarkerClockText();
+}
 function fmtDelay(min, known) {
   if (!known) return '–';
   if (min === 0) return '+0 Min';
@@ -1048,7 +1062,14 @@ function renderTable() {
   // Only insert the divider at an actual boundary between past and future
   // rows — not above everything (all-future) or below everything (all-past).
   if (nowIdx > 0 && nowIdx < rowsHtml.length) {
-    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · ${minToHHMM(now)}</span><span class="now-marker-line"></span></div></td></tr>`);
+    // The label gets its own id + a dedicated 1s interval (see
+    // tickNowMarkerClock) instead of being rebuilt by this function every
+    // second — renderTable() rebuilds the ENTIRE tbody (every row, every
+    // listener), which would be wasteful and steal scroll position/focus
+    // just to update a clock. Seeded with the real current time (seconds
+    // included) rather than nowMin()'s minute-granular value, which the
+    // ticker then keeps current between renders.
+    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · <span id="now-marker-clock">${nowMarkerClockText()}</span></span><span class="now-marker-line"></span></div></td></tr>`);
   }
 
   tbody.innerHTML = rowsHtml.join('');
@@ -2471,8 +2492,22 @@ function classifyEntry(e) {
 // Zürich HB, Zürich HB↔Chiasso, and reverse) — never for this one CH-soil
 // station where SBB's own realtime coverage isn't authoritative anyway.
 const CH_SOURCE_EXCLUDED_NAMES = new Set(['Basel Bad Bf']);
+// The mirror-image exception: Domodossola sits on Italian soil (placeCountry
+// says 'IT'), but for the Gotthard/Simplon EC axis it's also where SBB's
+// own dispatch genuinely begins/ends — confirmed live: transport.opendata.ch's
+// own Domodossola stationboard lists these EC trains on both the departure
+// board (IT→CH direction) AND the arrival board (CH→IT direction), same as
+// any ordinary Swiss station. Excluding it purely by country meant the
+// border stop's OWN arrival/departure never even tried the CH source no
+// matter how good the data actually was there — confirmed live: EC 65
+// Basel→Milano showed no live data at all for its own Domodossola arrival,
+// even though transport.opendata.ch's arrival board for "Domodossola" did
+// list this exact train.
+const CH_SOURCE_INCLUDED_NAMES = new Set(['Domodossola', 'Domodossola (I)']);
 function isSwissStop(stop) {
-  return placeCountry(stop) === 'CH' && !CH_SOURCE_EXCLUDED_NAMES.has(cleanStationName(stop?.name));
+  const name = cleanStationName(stop?.name);
+  if (CH_SOURCE_INCLUDED_NAMES.has(name)) return true;
+  return placeCountry(stop) === 'CH' && !CH_SOURCE_EXCLUDED_NAMES.has(name);
 }
 // The single hard gate every CH-source value must pass before being
 // applied. Kept as its own function (identical body to isSwissStop) so the
@@ -2753,7 +2788,17 @@ async function verifyCancellationsAgainstChSource() {
 // for this axis, just also applied at the row level here.
 async function enrichEcItalyRowsFromViaggiaTreno() {
   if (!VIAGGIATRENO_PROXY_BASE) return;
-  const candidates = TRAINS.filter(t => t.type === 'EC' && !t.delayKnown
+  // NOT gated on !t.delayKnown — ViaggiaTreno is the only reliable source
+  // for this whole axis (see above), and its own delay figure keeps
+  // changing as the train actually runs (confirmed live: EC 65 went from
+  // +9 to +23 to +29 over successive polls). Once delayKnown flipped true
+  // from this exact function's own EARLIER (correct-at-the-time) reading,
+  // that older gate then permanently skipped re-checking it ever again for
+  // the rest of the session — the row stayed stuck on "pünktlich"/whatever
+  // the first reading was, never picking up the delay actually growing.
+  // Re-running this every poll (still only for the small in-window EC/
+  // Chiasso-Domodossola subset) is the whole point, not a cost to avoid.
+  const candidates = TRAINS.filter(t => t.type === 'EC'
     && (t.chStation === 'Chiasso' || t.chStation === 'Domodossola') && inWindow(t));
   if (!candidates.length) return;
   let anyChanged = false;
@@ -3167,9 +3212,11 @@ document.querySelectorAll('.type-pill').forEach(p =>
   })
 );
 document.getElementById('reload-btn').addEventListener('click', () => {
+  // pollOpendata() already calls applyFilters()+stamp() itself once the
+  // refresh actually completes — calling them again here immediately,
+  // before that finishes, used to stamp "now" as the update time even
+  // though no new data had arrived yet.
   pollOpendata();
-  applyFilters();
-  stamp();
 });
 document.getElementById('detail-close').addEventListener('click', () => {
   state.selectedId = null; closeDetail(); renderTable();
@@ -3197,10 +3244,16 @@ function startApp() {
   stamp();
   pollOpendata();                          // realtime source (opentransportdata.swiss/SBB Ist-Daten via transport.opendata.ch)
   setInterval(pollOpendata, 120000);       // refresh live delays every 2 min
-  setInterval(() => { applyFilters(); stamp(); }, 60000); // shift time window every minute
-  setInterval(stamp, 1000); // "Stand: HH:MM:SS" ticks every second — it already had second-level
-  // precision, but only updated once a minute, so it visibly "froze" for up to 60s at a time
-  // instead of reading as a live, still-connected clock.
+  setInterval(applyFilters, 60000); // shift time window every minute — NOT a data refresh, so it must not touch "Stand" (see stamp)
+  // "Stand" ("Stand: HH:MM:SS") reflects when data was actually last
+  // refreshed — it's set by pollOpendata itself once a poll genuinely
+  // completes (every 2 min), nowhere else. A separate 1s interval used to
+  // tick stamp() directly, which just showed the CURRENT time relabelled
+  // as "Stand" — reading as a live clock, not a freshness indicator, and
+  // making it impossible to tell whether data was actually still updating
+  // or stuck. The JETZT divider (see tickNowMarkerClock) is the actual live
+  // clock now; "Stand" stays a real "last updated at" timestamp.
+  setInterval(tickNowMarkerClock, 1000);
   markItalyTrainsNotRunningToday();        // hide curated EC rows that don't actually run today
 }
 
