@@ -1310,14 +1310,19 @@ function zuglaufPanelHeader(t) {
     <div class="detail-route">${t.from} → ${t.to}</div>`;
 }
 
-async function renderZuglaufPanel(t) {
+async function renderZuglaufPanel(t, silent = false) {
   const content = document.getElementById('detail-content');
   const header = zuglaufPanelHeader(t);
   if (!t.tripId) {
     content.innerHTML = header + `<div class="zuglauf-msg">Zuglauf nicht verfügbar (noch kein Live-Treffer für diesen Zug).</div>`;
     return;
   }
-  content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
+  // A background refresh (see refreshOpenZuglaufPanel) skips the interim
+  // "Lädt…" flash — the panel is already showing a perfectly good previous
+  // result, and replacing it with a loading message every 2 minutes just to
+  // then replace it again would read as more disruptive than the staleness
+  // it's meant to fix. Only a fresh open (silent = false) shows it.
+  if (!silent) content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
   const stops = await fetchZuglaufStops(t);
   // The user may have selected a different train (or closed the panel)
   // while this was in flight — don't clobber whatever's showing now.
@@ -1539,7 +1544,7 @@ async function fetchZuglaufStops(train) {
         chIgnoredForeign++;
       }
 
-      const live = await fetchStopLiveForTrip(s.stopId, tripId, schedIso);
+      const live = await fetchStopLiveForTrip(s.stopId, tripId, schedIso, train.type, number);
       if (live?.realTime && live.place) {
         transitousHits++;
         return {
@@ -1975,7 +1980,10 @@ async function fetchChLiveForStop(stationName, type, number, schedHHMM, schedIso
   const anchor = `${anchorDate.getFullYear()}-${pad(anchorDate.getMonth()+1)}-${pad(anchorDate.getDate())} ${pad(anchorDate.getHours())}:${pad(anchorDate.getMinutes())}`;
   return await tryFetch(anchor, 'departure') || await tryFetch(anchor, 'arrival');
 }
-async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
+// type/number (this train's own category+number, e.g. {type:'NJ', number:
+// '470'}) are optional — passed by fetchZuglaufStops, unused by other
+// callers — and only matter for the sibling-trip fallback below.
+async function fetchStopLiveForTrip(stopId, tripId, schedIso, type, number) {
   if (!stopId) return null;
   const tryFetch = async (arriveBy, time) => {
     try {
@@ -1984,10 +1992,32 @@ async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
       const res = await fetchWithTimeout('https://api.transitous.org/api/v6/stoptimes?' + params);
       if (!res.ok) return null;
       const data = await res.json();
-      return (data.stopTimes || []).find(s => s.tripId === tripId) || null;
+      return data.stopTimes || [];
     } catch (e) { return null; }
   };
-  const forward = await tryFetch(false);
+  // The exact same physical service can be modelled as two entirely
+  // separate trip_ids by two different underlying feeds at the same stop —
+  // confirmed live: NJ 470 at Zürich HB exists both as a Swiss
+  // (ch-opentransportdataswiss26) trip, schedule-only (realTime: false),
+  // and as a German (de-DELFI) trip for the identical scheduled instant,
+  // WITH live tracking (realTime: true). Whichever trip_id our own route
+  // happened to be discovered under (see pollOpendata/border discovery) is
+  // the one we keep asking for by tripId — if THAT copy never carries a
+  // live update, a same category+number "sibling" at this exact stop that
+  // DOES have one is used instead, rather than reporting no data at all
+  // just because it lives under a different, better-tracked, trip_id.
+  const pick = (rows) => {
+    if (!rows) return null;
+    const own = rows.find(s => s.tripId === tripId);
+    if (own?.realTime) return own;
+    if (type && number) {
+      const sibling = rows.find(s => s.tripId !== tripId && s.realTime
+        && classifyEntry(s)?.type === type && classifyEntry(s)?.number === number);
+      if (sibling) return sibling;
+    }
+    return own || null;
+  };
+  const forward = pick(await tryFetch(false));
   if (forward) return forward;
   if (!schedIso) return null;
   // A stop already in the past never shows up in a forward (arriveBy=false)
@@ -1995,7 +2025,7 @@ async function fetchStopLiveForTrip(stopId, tripId, schedIso) {
   // anchored just after the stop's own scheduled time looks *backward* from
   // there instead, which does surface the historical realtime reading.
   const anchor = new Date(new Date(schedIso).getTime() + 15 * 60000).toISOString();
-  return await tryFetch(true, anchor);
+  return pick(await tryFetch(true, anchor));
 }
 
 // The border-crossing entry that flagged this train `cancelled` only knows
@@ -3306,11 +3336,32 @@ async function pollOpendata() {
 
     verifyCancellationsAgainstChSource();
     enrichEcItalyRowsFromViaggiaTreno();
+    // The Zuglauf panel only ever fetches once, at the moment it's opened —
+    // if a user leaves it open while the journey continues (confirmed live:
+    // ICE 203, watched over several hours), it just sits there showing
+    // whatever was true at open time forever, never picking up either a
+    // later recovery or a later-arriving correction. Re-running it here,
+    // alongside the overview's own 2-minute refresh, keeps an open panel as
+    // current as the rest of the dashboard instead of silently freezing.
+    if (state.selectedId != null) {
+      const openTrain = TRAINS.find(t => t._id === state.selectedId);
+      if (openTrain) refreshOpenZuglaufPanel(openTrain);
+    }
   } catch (e) {
     opendataOK = false;
     setConn('error');
     console.log('[transitous.org] poll failed', e);
   }
+}
+// Re-fetches and redraws an already-open Zuglauf panel without resetting
+// the user's scroll position — a full innerHTML replace (see
+// renderZuglaufPanel) would otherwise jump back to the top on every
+// 2-minute refresh, which is worse than the staleness it's meant to fix.
+async function refreshOpenZuglaufPanel(t) {
+  const panel = document.getElementById('detail-panel');
+  const scrollTop = panel.scrollTop;
+  await renderZuglaufPanel(t, true);
+  panel.scrollTop = scrollTop;
 }
 
 function setConn(s) {
