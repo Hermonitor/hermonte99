@@ -1399,6 +1399,12 @@ async function fetchZuglaufStops(train) {
       const destIsItaly = italyIsDestination(train);
       const originId = viaggiatrenoOriginIdFor(train);
       const dayOffset = trainDayOffset(train);
+      // The border stop's own fully-built ViaggiaTreno entry (scheduled +
+      // effective arrival/departure, same shape as every other stop) —
+      // captured here so the passList rebuild below (IT→CH direction) can
+      // use it too, even though it's normally dropped from the spliced-in
+      // Italian tail (see "stays on the CH source" below).
+      let vtBorderStop = null;
       let fermate = await fetchViaggiaTrenoRun(originId, number, dayOffset);
       if (!fermate?.length && !destIsItaly) {
         // IT→CH direction and either we don't have this Italian origin's ID
@@ -1444,6 +1450,7 @@ async function fetchZuglaufStops(train) {
             source: 'viaggiatreno',
           };
         });
+        vtBorderStop = builtStops.find(s => sameStation(s.name, train.chStation)) || null;
         // The border station itself (Chiasso/Domodossola) stays on the CH
         // source, per the agreed rule ("bis/ab der Grenze" — the border is
         // the last/first stop the Swiss source is authoritative for, not
@@ -1452,7 +1459,9 @@ async function fetchZuglaufStops(train) {
         // departure OR only an arrival — never both, since it's the edge
         // of VT's queried run) — dropping it here also avoids silently
         // replacing a CH-confirmed, fully-populated row with VT's
-        // necessarily-incomplete one for that same stop.
+        // necessarily-incomplete one for that same stop. Its delay/arrival
+        // figures are still used as a fallback below (see vtBorderStop),
+        // just not the whole row wholesale.
         const italianOnly = destIsItaly ? builtStops.slice(1) : builtStops.slice(0, -1);
         itHits = italianOnly.length;
         if (destIsItaly) {
@@ -1489,11 +1498,34 @@ async function fetchZuglaufStops(train) {
       if (!destIsItaly) {
         const chEntry = await fetchChPassList(train.chStation, train.type, number);
         if (chEntry?.passList?.length) {
-          const delayMin = typeof chEntry.stop?.delay === 'number' ? chEntry.stop.delay : 0;
+          // SBB's own passList delay only reflects what's been picked up on
+          // SWISS soil — for a train still arriving from Italy, that can
+          // lag well behind ViaggiaTreno's own, more current reading of the
+          // exact same border departure (confirmed live: EC 64 already
+          // 23-29 min late per ViaggiaTreno, while this same passList's own
+          // delay for the identical Domodossola departure still read 0 —
+          // silently applying that stale 0 to every following Swiss stop
+          // too, i.e. Brig/Visp/etc. all showing minutes instead of the
+          // real ~25). Never trust a lower figure than what ViaggiaTreno
+          // already confirmed for the border itself.
+          const chDelayMin = typeof chEntry.stop?.delay === 'number' ? chEntry.stop.delay : 0;
+          const vtBorderDelayMin = vtBorderStop && vtBorderStop.scheduledArrival && vtBorderStop.arrival
+            ? Math.round((new Date(vtBorderStop.arrival) - new Date(vtBorderStop.scheduledArrival)) / 60000)
+            : vtBorderStop && vtBorderStop.scheduledDeparture && vtBorderStop.departure
+              ? Math.round((new Date(vtBorderStop.departure) - new Date(vtBorderStop.scheduledDeparture)) / 60000)
+              : 0;
+          const delayMin = Math.max(chDelayMin, vtBorderDelayMin);
           const delayMs = delayMin * 60000;
           const passStops = chEntry.passList.map((p, i) => {
             const name = cleanStationName(p.station?.name || (i === 0 ? train.chStation : ''));
-            const schedArr = p.arrival, schedDep = p.departure;
+            // SBB's own board entry for the border stop itself often has
+            // only a departure, no arrival (Swiss dispatch begins there —
+            // it doesn't model the train "arriving" from Italy) — leaving
+            // "An" permanently blank even though ViaggiaTreno already knows
+            // that arrival. Falls back to VT's own scheduled arrival for
+            // just that one stop when the CH source has none.
+            const schedArr = p.arrival || (i === 0 ? vtBorderStop?.scheduledArrival : null);
+            const schedDep = p.departure;
             if (!name || (!schedArr && !schedDep)) return null; // GTFS structural points (tunnel markers etc.), not real stops
             return {
               name,
