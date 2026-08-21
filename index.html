@@ -1420,19 +1420,16 @@ async function fetchZuglaufStops(train) {
         // the whole Italian tail must be rebuilt from fermate directly and
         // spliced in as a block, replacing however many (or few) stops
         // Transitous had for that same stretch.
-        const builtStops = fermate.map(f => {
+        const builtStops = withEffectiveDelays(fermate).map(f => {
           const progArr = f.arrivo_teorico;
           const progDep = f.partenza_teorica;
-          // ritardo (delay, in minutes) is ViaggiaTreno's live-tracked
-          // prognosis for this specific train run — present and meaningful
-          // even before arrivoReale/partenzaReale (only set once the train
-          // has actually passed a stop) exist. Gating on the Reale fields
-          // left every not-yet-reached stop showing "–" despite ViaggiaTreno
-          // already having a real-time-based estimate; use scheduled+ritardo
-          // as the effective time whenever ritardo is known, same as the
-          // Swiss stationboard source treats "delay 0, not yet departed" as
-          // a confirmed live value elsewhere in this dashboard.
-          const delayMs = (typeof f.ritardo === 'number' ? f.ritardo : 0) * 60000;
+          // effDelay (see withEffectiveDelays) forward-fills a not-yet-
+          // reached stop's stale ritardo with the last CONFIRMED delay on
+          // this run, instead of trusting scheduled+ritardo blindly (that
+          // used to show every not-yet-reached stop as "on time" the
+          // instant ritardo read 0, even minutes after the train had
+          // already left its origin late — confirmed live: EC 64/Domodossola).
+          const delayMs = f.effDelay * 60000;
           const effArr = f.arrivoReale ?? (progArr != null ? progArr + delayMs : null);
           const effDep = f.partenzaReale ?? (progDep != null ? progDep + delayMs : null);
           return {
@@ -1442,7 +1439,8 @@ async function fetchZuglaufStops(train) {
             arrival: effArr != null ? new Date(effArr).toISOString() : null,
             departure: effDep != null ? new Date(effDep).toISOString() : null,
             cancelled: !!f.soppressa,
-            liveConfirmed: true,
+            liveConfirmed: f.confirmed,
+            forecast: !f.confirmed,
             source: 'viaggiatreno',
           };
         });
@@ -2530,6 +2528,32 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno, dayOffset = 0)
     return data.fermate;
   } catch (e) { return null; }
 }
+// A fermata's own `ritardo` (delay, minutes) is only trustworthy once
+// ViaggiaTreno has actually tracked the train there (arrivoReale or
+// partenzaReale set) — for any stop still AHEAD of the train it just echoes
+// the scheduled figure, usually 0, understating a delay already known
+// further back on the very same run (confirmed live: EC 64 departed Milano
+// Centrale 23 min late — partenzaReale confirmed it — yet Domodossola's own
+// not-yet-reached fermata still read ritardo:0, showing an "on time"
+// forecast for a train that was already 23 minutes behind; the Zuglauf's
+// own An/Ab for Domodossola inherited that same too-optimistic figure).
+// Forward-fills each not-yet-confirmed stop with the LAST confirmed delay
+// seen so far on this run — never assumes a delay has recovered before
+// that's actually observed, but also never overrides a stop's own ritardo
+// once it IS confirmed (a train can genuinely make up time, not just lose
+// it). Shared by every place that reads a fermata's delay — the row-level
+// status (enrichEcItalyRowsFromViaggiaTreno) and the Zuglauf table
+// (fetchZuglaufStops) — so neither one is only half-fixed.
+function withEffectiveDelays(fermate) {
+  let lastConfirmedDelay = 0;
+  return fermate.map(f => {
+    const confirmed = f.arrivoReale != null || f.partenzaReale != null;
+    const ownDelay = typeof f.ritardo === 'number' ? f.ritardo : 0;
+    const effDelay = confirmed ? ownDelay : Math.max(ownDelay, lastConfirmedDelay);
+    if (confirmed) lastConfirmedDelay = ownDelay;
+    return {...f, effDelay, confirmed};
+  });
+}
 // Determines the correct ViaggiaTreno origin ID for a curated Italy-axis
 // EC train, based on which end of its route is on Italian soil (see the
 // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above). Curated
@@ -2715,10 +2739,18 @@ async function enrichEcItalyRowsFromViaggiaTreno() {
     // precise), falling back to whichever end of the fermate array VT
     // files the border under for this direction (see
     // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS above).
-    const borderF = fermate.find(f => sameStation(f.stazione || f.nomeStazione || '', t.chStation))
-      || (destIsItaly ? fermate[0] : fermate[fermate.length - 1]);
-    if (!borderF || typeof borderF.ritardo !== 'number') return;
-    t.delay = borderF.ritardo;
+    // effDelay (see withEffectiveDelays) instead of the border fermata's own
+    // raw ritardo — that field only updates once ViaggiaTreno has actually
+    // tracked the train AT the border, so a train that's already running
+    // late somewhere earlier in Italy but hasn't reached the border yet
+    // still showed ritardo:0 there, i.e. "pünktlich" (confirmed live: EC 65
+    // running late but the row showing on-time). effDelay carries the last
+    // confirmed delay forward until the border itself confirms otherwise.
+    const fermateEff = withEffectiveDelays(fermate);
+    const borderF = fermateEff.find(f => sameStation(f.stazione || f.nomeStazione || '', t.chStation))
+      || (destIsItaly ? fermateEff[0] : fermateEff[fermateEff.length - 1]);
+    if (!borderF) return;
+    t.delay = borderF.effDelay;
     t.status = borderF.soppressa ? 'cancelled' : (t.delay > 5 ? 'delayed' : 'on-time');
     t.delayKnown = true;
     t._confirmedDateKey = trainTargetDateKey(t);
