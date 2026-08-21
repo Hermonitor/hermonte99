@@ -496,17 +496,17 @@
     <section>
       <h2><span class="num">01</span>Was Hermonitor macht</h2>
       <p>Hermonitor zeigt in einer einzigen Tabelle, welche internationalen Fernzüge (ICE, TGV, EC, IC, RJX, NJ und ausgewählte RE/TER) die Schweizer Grenze <b>gerade oder demnächst</b> überqueren — mit Verspätung, Status und einem aufklappbaren Zuglauf pro Zug. Ziel ist ein schneller Überblick über die Lage an allen Grenzübergängen gleichzeitig, ohne mehrere Bahn-Apps öffnen zu müssen.</p>
-      <p>Die Seite ist <b>eine einzelne HTML-Datei</b> ohne eigenes Backend. Alles läuft im Browser; die einzige Ausnahme ist ein kleiner Proxy (auf Vercel gehostet), der ausschliesslich dazu dient, Trenitalias ViaggiaTreno- und ÖBB-Daten browserseitig abrufbar zu machen (Abschnitt 2) — beide APIs erlauben keine direkten Anfragen von fremden Domains.</p>
+      <p>Die Seite ist <b>eine einzelne HTML-Datei</b> ohne eigenes Backend. Alles läuft im Browser; die einzige Ausnahme ist ein kleiner Proxy (auf Vercel gehostet), der ausschliesslich dazu dient, Trenitalias ViaggiaTreno-Daten browserseitig abrufbar zu machen (Abschnitt 2).</p>
     </section>
 
     <section>
       <h2><span class="num">02</span>Woher die Daten kommen</h2>
-      <p>Vier unabhängige, kostenlose Quellen werden kombiniert. Keine davon deckt alles ab — deshalb die Kombination.</p>
+      <p>Drei unabhängige, kostenlose Quellen werden kombiniert. Keine davon deckt alles ab — deshalb die Kombination.</p>
       <div class="guide-source-grid">
         <div class="guide-source-card">
           <span class="src-name">transitous.org</span>
           <span class="src-role">Grundgerüst</span>
-          <p>Freier Routingdienst (MOTIS) auf GTFS-Basis aus CH/DE/FR/AT/IT. Liefert Fahrplan, Halte und Zuglauf für praktisch jede Verbindung — Echtzeitdaten sind ausserhalb der Schweiz aber oft dünn. Trägt weiterhin die DB-Achse (Basel Bad Bf/Schaffhausen/St. Margrethen) und die SNCF-Achse (TGV Lyria via Basel SBB/Vallorbe/Genève) — siehe Kasten unten.</p>
+          <p>Freier Routingdienst (MOTIS) auf GTFS-Basis aus CH/DE/FR/AT/IT. Liefert Fahrplan, Halte und Zuglauf für praktisch jede Verbindung — Echtzeitdaten sind ausserhalb der Schweiz aber oft dünn.</p>
         </div>
         <div class="guide-source-card">
           <span class="src-name">opendata.ch</span>
@@ -518,27 +518,17 @@
           <span class="src-role">Italienisches Netz</span>
           <p>Trenitalias eigenes Live-Tracking. Einzige verlässliche Quelle für den italienischen Streckenteil Richtung/ab Chiasso und Domodossola.</p>
         </div>
-        <div class="guide-source-card">
-          <span class="src-name">fahrplan.oebb.at</span>
-          <span class="src-role">Österreichisches Netz</span>
-          <p>ÖBB-eigenes Live-Tracking über den Bahnhof Feldkirch, die letzte AT-Station vor der Grenze. Einzige verlässliche Quelle für RJX/Nightjet Richtung/ab Buchs SG, inklusive vollem Zuglauf.</p>
-        </div>
-      </div>
-      <div class="guide-callout" style="margin-top:20px">
-        <span class="guide-label">Geprüft, aber nicht umsetzbar: DB und SNCF direkt</span>
-        <p>bahn.de und sncf-voyageurs.com haben beide eine vergleichbar gute interne API wie ÖBB — beide sind aber hinter hartem Bot-Schutz (Akamai bzw. DataDome), der auch server-seitige Proxy-Anfragen blockiert, nicht nur Browser-Scraping. Bestätigt live: bahn.de antwortet mit <code>403 OPS_BLOCKED</code>, sncf-voyageurs.com leitet auf ein Captcha um — beides unabhängig von Headern oder Cookies. Beide Achsen bleiben deshalb auf transitous.org/opendata.ch wie zuvor.</p>
       </div>
     </section>
 
     <section>
       <h2><span class="num">03</span>Wer hat wo das letzte Wort</h2>
-      <p>Die vier Quellen widersprechen sich gelegentlich. Grundregel: <b>die räumlich zuständige Quelle gewinnt</b> — nicht die zuerst antwortende.</p>
+      <p>Die drei Quellen widersprechen sich gelegentlich. Grundregel: <b>die räumlich zuständige Quelle gewinnt</b> — nicht die zuerst antwortende.</p>
       <table class="guide-table">
         <thead><tr><th>Streckenabschnitt</th><th>Bevorzugte Quelle</th><th>Fallback</th></tr></thead>
         <tbody>
           <tr><td>Schweizer Netz (alle Grenzstationen)</td><td><span class="guide-pill">opendata.ch</span></td><td>transitous.org</td></tr>
-          <tr><td>Deutschland / Frankreich, jenseits der Grenze (DB/SNCF)</td><td><span class="guide-pill">transitous.org</span></td><td>—</td></tr>
-          <tr><td>Österreich, Achse Feldkirch / Buchs SG (RJX/Nightjet)</td><td><span class="guide-pill">fahrplan.oebb.at</span></td><td>—</td></tr>
+          <tr><td>Deutschland / Frankreich / Österreich, jenseits der Grenze</td><td><span class="guide-pill">transitous.org</span></td><td>—</td></tr>
           <tr><td>Italien, Achse Chiasso / Domodossola</td><td><span class="guide-pill">ViaggiaTreno</span></td><td>transitous.org</td></tr>
         </tbody>
       </table>
@@ -1323,18 +1313,12 @@ function zuglaufPanelHeader(t) {
 async function renderZuglaufPanel(t) {
   const content = document.getElementById('detail-content');
   const header = zuglaufPanelHeader(t);
-  // RJX/NJ crossing at Buchs SG get their entire Zuglauf from the ÖBB
-  // source instead of Transitous's /trip — see fetchOebbZuglaufStops above
-  // for why (same "authoritative source for this axis" rule as Italy/
-  // ViaggiaTreno, just gated on _oebbJid instead of tripId).
-  const usesOebb = (t.type === 'RJX' || t.type === 'NJ') && t.chStation === 'Buchs SG';
-  const ready = usesOebb ? t._oebbJid : t.tripId;
-  if (!ready) {
+  if (!t.tripId) {
     content.innerHTML = header + `<div class="zuglauf-msg">Zuglauf nicht verfügbar (noch kein Live-Treffer für diesen Zug).</div>`;
     return;
   }
   content.innerHTML = header + `<div class="zuglauf-msg">Lädt Zuglauf…</div>`;
-  const stops = usesOebb ? await fetchOebbZuglaufStops(t) : await fetchZuglaufStops(t);
+  const stops = await fetchZuglaufStops(t);
   // The user may have selected a different train (or closed the panel)
   // while this was in flight — don't clobber whatever's showing now.
   if (state.selectedId !== t._id) return;
@@ -2947,137 +2931,6 @@ async function verifyCancellationsAgainstChSource() {
   if (anyChanged) applyFilters();
 }
 
-// ─── ÖBB SOURCE (fahrplan.oebb.at, AT↔CH border via Feldkirch/Buchs SG) ───────
-// Same idea as the ViaggiaTreno block above, for the other land border this
-// dashboard watches with a curated, non-Swiss authoritative source: RJX/NJ
-// trains crossing at Buchs SG all pass through Feldkirch (the last AT
-// station before the border) shortly before/after. fahrplan.oebb.at's own
-// webapp talks to an undocumented same-origin HAFAS v1.95 JSON gateway
-// (POST /gate) with no CORS for foreign origins — proxied server-side (see
-// viaggiatreno-proxy-vercel/api/oebb.js next to this file, same Vercel
-// project as the ViaggiaTreno proxy). Only ever used to enrich the existing
-// curated RJX/NJ@Buchs SG rows from BASE_TRAINS — never to discover new
-// rows — so the "only CH-relevant trains" rule holds automatically: every
-// candidate here already has a Zürich↔ endpoint by construction, and a
-// domestic-Austria bus/S-Bahn/Westbahn service on the same Feldkirch board
-// simply never matches any curated train number.
-//
-// bahn.de (DB) and sncf-voyageurs.com (SNCF) were evaluated the same way
-// and both have clean equivalent APIs — but bahn.de's is behind Akamai Bot
-// Manager (confirmed live: 403 OPS_BLOCKED from this exact Vercel project,
-// even with realistic headers and primed cookies — it needs a
-// browser-computed sensor payload a server can't produce) and
-// sncf-voyageurs.com's is behind DataDome (confirmed live: every proxied
-// call gets redirected to a captcha-delivery.com interstitial regardless of
-// headers/cookies). Both are therefore left on transitous.org/opendata.ch,
-// same as before this change — DB via Basel Bad Bf/Schaffhausen/St.
-// Margrethen, SNCF (TGV Lyria) via Basel SBB/Vallorbe/Genève.
-const OEBB_PROXY_BASE = VIAGGIATRENO_PROXY_BASE; // same Vercel project, /api/oebb
-// jid strings encode category+number inline, e.g.
-// "...#CA#RJX#ZE#19918#ZB#RJX19918#..." — cheaper and just as reliable as a
-// second round-trip to resolve them, since the board response already has
-// this for every row.
-function parseOebbJid(jid) {
-  const m = /#CA#([A-Za-z]+)#ZE#(\d+)#/.exec(jid || '');
-  return m ? { cat: m[1], num: m[2] } : null;
-}
-// fahrplan.oebb.at reports every time as a single calendar date (the "date"
-// field alongside each entry) plus an HHMMSS wall-clock offset that can run
-// past 240000 for a stop reached after midnight (e.g. "260000" = 02:00 the
-// following day) — the standard HAFAS convention for keeping one journey's
-// stops unambiguous under one date without per-stop day bookkeeping.
-// Vienna and Zürich share the exact same UTC offset year-round (same
-// CET/CEST switch dates across the EU), so Zurich's own offset is reused
-// directly — no separate Vienna-specific handling needed.
-function hafasToIso(dateStr, hhmmss) {
-  if (!dateStr || hhmmss == null || hhmmss === '') return null;
-  const y = +dateStr.slice(0, 4), mo = +dateStr.slice(4, 6) - 1, d = +dateStr.slice(6, 8);
-  const n = typeof hhmmss === 'string' ? parseInt(hhmmss, 10) : hhmmss;
-  if (!Number.isFinite(n)) return null;
-  const h = Math.floor(n / 10000), mi = Math.floor((n % 10000) / 100), s = n % 100;
-  const dayOverflow = Math.floor(h / 24);
-  const asUtcGuess = Date.UTC(y, mo, d + dayOverflow, h % 24, mi, s);
-  const zurichWall = new Date(asUtcGuess).toLocaleString('en-US', { timeZone: 'Europe/Zurich', hour12: false });
-  const zurichAsUtc = new Date(zurichWall.replace(',', '') + ' UTC').getTime();
-  const offsetMs = zurichAsUtc - asUtcGuess;
-  return new Date(asUtcGuess - offsetMs).toISOString();
-}
-async function fetchOebbBoard() {
-  try {
-    const res = await fetchWithTimeout(`${OEBB_PROXY_BASE}/oebb?meth=board`, {}, 8000);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.svcResL?.[0]?.res?.jnyL || null;
-  } catch (e) { return null; }
-}
-// Row-level pass, same shape as enrichEcItalyRowsFromViaggiaTreno below —
-// NOT gated on !t.delayKnown, since the Feldkirch board is the authoritative
-// source for this axis and its own reading keeps changing as the train
-// actually runs.
-async function enrichOebbRowsFromFeldkirch() {
-  const candidates = TRAINS.filter(t => (t.type === 'RJX' || t.type === 'NJ') && t.chStation === 'Buchs SG' && inWindow(t));
-  if (!candidates.length) return;
-  const jnyL = await fetchOebbBoard();
-  if (!jnyL) return;
-  let anyChanged = false;
-  candidates.forEach(t => {
-    const num = numKey(t.id);
-    const hit = jnyL.find(jny => {
-      const p = parseOebbJid(jny.jid);
-      return p && p.cat === t.type && p.num === num;
-    });
-    const stb = hit?.stbStop;
-    if (!hit || !stb) return;
-    const cancelled = !!stb.dCncl;
-    if (!stb.dTimeR && !cancelled) return; // schedule-only reading — nothing new to apply yet
-    const schedIso = hafasToIso(hit.date, stb.dTimeS);
-    const delayMin = (!cancelled && stb.dTimeR && schedIso)
-      ? Math.round((new Date(hafasToIso(hit.date, stb.dTimeR)) - new Date(schedIso)) / 60000) : 0;
-    t.delay = delayMin;
-    t.status = cancelled ? 'cancelled' : (delayMin > 5 ? 'delayed' : 'on-time');
-    t.delayKnown = true;
-    t._confirmedDateKey = zurichDateKey(new Date());
-    t._oebbJid = hit.jid; // powers the ÖBB-sourced Zuglauf, see fetchOebbZuglaufStops
-    t.liveSeen = true;
-    anyChanged = true;
-  });
-  if (anyChanged) applyFilters();
-}
-// Full stop-by-stop Zuglauf for an ÖBB-sourced row, straight from
-// JourneyDetails — replaces the Transitous /trip route entirely for these
-// trains (not just the realtime layer), per the same "ÖBB is authoritative
-// for this axis" reasoning as the row-level enrichment above. Converts into
-// the exact stop shape buildZuglaufTable already expects (see
-// fetchZuglaufStops), so the renderer needs no changes at all.
-async function fetchOebbZuglaufStops(train) {
-  if (!train._oebbJid) return null;
-  try {
-    const res = await fetchWithTimeout(`${OEBB_PROXY_BASE}/oebb?meth=journey&jid=${encodeURIComponent(train._oebbJid)}`, {}, 8000);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const svcRes = data.svcResL?.[0]?.res;
-    const journey = svcRes?.journey;
-    const locL = svcRes?.common?.locL;
-    if (!journey?.stopL || !locL) return null;
-    const date = journey.date;
-    return journey.stopL.map(s => {
-      const loc = locL[s.locX];
-      const name = cleanStationName(loc?.name) || loc?.name || '';
-      const scheduledArrival = s.aTimeS != null ? hafasToIso(date, s.aTimeS) : null;
-      const scheduledDeparture = s.dTimeS != null ? hafasToIso(date, s.dTimeS) : null;
-      return {
-        name,
-        scheduledArrival, scheduledDeparture,
-        arrival: s.aTimeR != null ? hafasToIso(date, s.aTimeR) : null,
-        departure: s.dTimeR != null ? hafasToIso(date, s.dTimeR) : null,
-        cancelled: !!(s.aCncl || s.dCncl),
-        liveConfirmed: !!(s.aTimeR != null || s.dTimeR != null),
-        source: 'ÖBB',
-      };
-    });
-  } catch (e) { return null; }
-}
-
 // ViaggiaTreno is the only reliable realtime source for the CH→IT leg of
 // an EC crossing at Chiasso/Domodossola — the Swiss source reliably
 // tracks a train ARRIVING from Italy (confirmed: EC 28's Chiasso arrival
@@ -3453,7 +3306,6 @@ async function pollOpendata() {
 
     verifyCancellationsAgainstChSource();
     enrichEcItalyRowsFromViaggiaTreno();
-    enrichOebbRowsFromFeldkirch();
   } catch (e) {
     opendataOK = false;
     setConn('error');
