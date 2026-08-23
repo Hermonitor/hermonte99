@@ -290,7 +290,7 @@
   }
   .auth-gate.hidden { display: none; }
   .auth-card {
-    width: 100%; max-width: 340px;
+    width: 100%; max-width: 380px;
     background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
     padding: 36px 32px; display: flex; flex-direction: column; gap: 6px;
     box-shadow: 0 20px 60px oklch(0% 0 0 / 0.4);
@@ -316,6 +316,17 @@
   }
   .auth-submit:hover { background: var(--amber); }
   .auth-error { font-size: 13px; color: var(--red); text-align: center; min-height: 16px; margin-top: 14px; }
+  .auth-note { margin-top: 20px; padding: 14px 16px; border: 1px solid oklch(45% 0.08 75 / 0.4); border-left: 3px solid var(--amber); background: oklch(22% 0.05 75 / 0.4); border-radius: 4px; }
+  .auth-note-icon { color: var(--amber); font-weight: 700; margin-right: 4px; }
+  .auth-note p { font-size: 12px; line-height: 1.5; color: var(--text2); margin: 0 0 8px; }
+  .auth-note p:last-of-type { margin-bottom: 10px; }
+  .auth-note-flags { display: flex; flex-direction: column; gap: 6px; }
+  .auth-note-flags a { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text); text-decoration: none; padding: 5px 8px; border-radius: 5px; transition: background 0.15s, color 0.15s; }
+  .auth-note-flags a:hover { background: var(--bg3); color: var(--amber); }
+  /* Flag emoji render inconsistently depending on the OS/font (confirmed:
+     showed as blank boxes for the user) — a plain text country-code badge
+     has no such dependency and is guaranteed visible everywhere. */
+  .auth-note-flags .flag { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.03em; color: var(--amber-dim); background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; padding: 2px 5px; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -328,6 +339,16 @@
     <input class="auth-input" id="auth-password" type="password" autocomplete="current-password" autofocus>
     <button class="auth-submit" type="submit">Anmelden</button>
     <div class="auth-error" id="auth-error"></div>
+    <div class="auth-note">
+      <p><span class="auth-note-icon">⚠</span>Hermonitor ist ein Hilfsmittel zur groben Übersicht, keine offizielle Auskunft. Zeiten, Verspätungsprognosen etc. können falsch oder veraltet sein.</p>
+      <p>Für die eigentliche Reiseplanung immer zusätzlich die offizielle Quelle der jeweiligen Bahn prüfen:</p>
+      <div class="auth-note-flags">
+        <a href="https://ris-info.bahn.de/#/login" target="_blank" rel="noopener"><span class="flag">DE</span> DB RIS-Info</a>
+        <a href="http://www.viaggiatreno.it/infomobilita/index.jsp" target="_blank" rel="noopener"><span class="flag">IT</span> ViaggiaTreno</a>
+        <a href="https://fahrplan.oebb.at/bin/trainsearch.exe/dn?protocol=https:&" target="_blank" rel="noopener"><span class="flag">AT</span> ÖBB Fahrplan</a>
+        <a href="https://www.sncf-voyageurs.com/fr/voyagez-avec-nous/horaires-et-itineraires/recherche-de-train/" target="_blank" rel="noopener"><span class="flag">FR</span> SNCF Voyageurs</a>
+      </div>
+    </div>
   </form>
 </div>
 
@@ -887,7 +908,13 @@ const BASE_TRAINS = [
   {id:'EC 25',  from:'Zürich HB',       to:'Milano Centrale', dep:'17:33', arr:'21:00', chTime:'20:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 27',  from:'Zürich HB',       to:'Milano Centrale', dep:'18:33', arr:'22:00', chTime:'21:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 29',  from:'Zürich HB',       to:'Milano Centrale', dep:'19:33', arr:'23:00', chTime:'22:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
-  {id:'EC 151', from:'Basel SBB',       to:'Milano Centrale', dep:'10:47', arr:'15:08', chTime:'14:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  // Actually runs through to/from Frankfurt (Main) Hbf, not just Basel SBB —
+  // corrected from live data (confirmed: Transitous's own full stop list for
+  // today's run includes both Chiasso AND Basel Bad Bf, i.e. it genuinely
+  // crosses two borders). Tracked at Basel Bad Bf per explicit instruction —
+  // "10:47"/"Chiasso" here previously was actually this same physical
+  // train's later, domestic Basel SBB continuation time, not its real origin.
+  {id:'EC 151', from:'Frankfurt (Main) Hbf', to:'Milano Centrale', dep:'08:02', arr:'15:50', chTime:'10:45', chStation:'Basel Bad Bf', type:'EC', region:'nord', operator:'Trenitalia/DB'},
   {id:'EC 153', from:'Basel SBB',       to:'Milano Centrale', dep:'14:47', arr:'19:08', chTime:'18:55', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
 
   {id:'EC 10',  from:'Milano Centrale', to:'Zürich HB',       dep:'07:10', arr:'10:27', chTime:'08:05', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
@@ -900,7 +927,10 @@ const BASE_TRAINS = [
   {id:'EC 22',  from:'Milano Centrale', to:'Zürich HB',       dep:'15:00', arr:'19:27', chTime:'17:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 24',  from:'Milano Centrale', to:'Zürich HB',       dep:'16:00', arr:'20:27', chTime:'17:51', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
   {id:'EC 28',  from:'Milano Centrale', to:'Zürich HB',       dep:'19:00', arr:'23:27', chTime:'21:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
-  {id:'EC 150', from:'Milano Centrale', to:'Basel SBB',        dep:'07:00', arr:'11:12', chTime:'09:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
+  // Actually runs through to Frankfurt (Main) Hbf, not just Basel SBB — see
+  // EC 151's comment above (same physical line, opposite direction). Tracked
+  // at Chiasso per explicit instruction.
+  {id:'EC 150', from:'Milano Centrale', to:'Frankfurt (Main) Hbf', dep:'11:10', arr:'18:44', chTime:'11:58', chStation:'Chiasso', type:'EC', region:'ost', operator:'Trenitalia/DB'},
   {id:'EC 152', from:'Milano Centrale', to:'Basel SBB',        dep:'11:00', arr:'15:12', chTime:'13:00', chStation:'Chiasso', type:'EC', region:'ost', operator:'SBB/Trenitalia'},
 
   // ── REGION WEST: Via Domodossola (EC Simplon Basel/Genève↔Milano) ────────
@@ -2364,8 +2394,12 @@ const BORDER_STATIONS = [
   {name:'Vallorbe',       region:'west'},
 ];
 // Maps a run's category letters (parsed from tripShortName/routeShortName)
-// to the badge types used in this dashboard.
-const CATEGORY_MAP = {ICE:'ICE', TGV:'TGV', EC:'EC', IC:'IC', RJ:'RJX', RJX:'RJX', NJ:'NJ', EN:'NJ', RE7:'RE7', TER:'TER'};
+// to the badge types used in this dashboard. "ECM" is DB's own routeShortName
+// for EC 150/151 (Milano↔Frankfurt) at times when its tripShortName comes
+// back purely numeric ("000150") instead of "EC 150" — confirmed live,
+// otherwise unparseable by classifyEntryRaw at all (see
+// FORCE_CATEGORY_BY_NUMBER for the OTHER DB-side quirk on this same line).
+const CATEGORY_MAP = {ICE:'ICE', TGV:'TGV', EC:'EC', ECM:'EC', IC:'IC', RJ:'RJX', RJX:'RJX', NJ:'NJ', EN:'NJ', RE7:'RE7', TER:'TER'};
 
 // transitous.org watched long-distance/night-rail modes — excludes regional/
 // S-Bahn/suburban traffic so domestic short-hops never need to be fetched
@@ -2685,7 +2719,25 @@ async function fetchStopTimesBothDirections(stopId, extraModes) {
 // this session (also the fix for it-trenitalia's EC feed reporting a
 // meaningless "0" as its own tripShortName) — tried as a same-shape
 // fallback before giving up.
+// Trenitalia's own feed correctly calls EC 150/151 (Milano↔Frankfurt) "EC"
+// — DB Fernverkehr AG's own German-side feed instead reports the identical
+// physical service as "IC 150"/"IC 151" (confirmed live: tripShortName/
+// displayName literally "IC 151", agencyName "DB Fernverkehr AG"), and at
+// other times reports it with an unrecognised routeShortName "ECM" and a
+// purely numeric tripShortName "000150" that classifyEntryRaw can't parse
+// at all. Both are the same underlying DB-side labelling quirk for this one
+// international line, not a genuine domestic IC reusing these numbers —
+// corrected here so the two feeds' reports of the same physical train
+// converge on one category instead of creating a same-time "IC 150"/
+// "EC 150" duplicate pair.
+const FORCE_CATEGORY_BY_NUMBER = {'150': 'EC', '151': 'EC'};
 function classifyEntry(e) {
+  const raw = classifyEntryRaw(e);
+  if (!raw) return raw;
+  const forced = FORCE_CATEGORY_BY_NUMBER[raw.number];
+  return forced ? {type: forced, number: raw.number} : raw;
+}
+function classifyEntryRaw(e) {
   const parseCore = (s) => {
     const m = (s || '').trim().match(/^([A-Za-z]+)\s*(\d+)$/);
     if (!m) return null;
