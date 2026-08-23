@@ -164,6 +164,9 @@
   .td-delay { font-family: var(--font-mono); font-size: 14px; font-weight: 500; }
   .td-delta { font-size: 11px; font-weight: 600; }
   .td-empty { color: var(--text2); }
+  .td-verify { text-align: center; }
+  .verify-link { font-family: var(--font-mono); font-size: 11px; color: var(--text2); text-decoration: none; padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; white-space: nowrap; transition: all 0.15s; }
+  .verify-link:hover { color: var(--amber); border-color: var(--amber-dim); background: var(--bg3); }
   /* Forward-projected forecast (see propagateDelayForward): a projection
      from the last known delay, not a confirmed reading for this specific
      stop — kept visually distinct (muted + italic) from both a genuine
@@ -341,7 +344,7 @@
     <div class="auth-error" id="auth-error"></div>
     <div class="auth-note">
       <p><span class="auth-note-icon">⚠</span>Hermonitor ist ein Hilfsmittel zur groben Übersicht, keine offizielle Auskunft. Zeiten, Verspätungsprognosen etc. können falsch oder veraltet sein.</p>
-      <p>Immer zusätzlich die offizielle Quelle der jeweiligen Bahn prüfen:</p>
+      <p>Für die eigentliche Reiseplanung immer zusätzlich die offizielle Quelle der jeweiligen Bahn prüfen:</p>
       <div class="auth-note-flags">
         <a href="https://ris-info.bahn.de/#/login" target="_blank" rel="noopener"><span class="flag">DE</span> DB RIS-Info</a>
         <a href="http://www.viaggiatreno.it/infomobilita/index.jsp" target="_blank" rel="noopener"><span class="flag">IT</span> ViaggiaTreno</a>
@@ -458,13 +461,14 @@
     <div class="table-wrap">
       <table id="train-table">
         <colgroup>
-          <col style="width:12%">
-          <col style="width:16%">
-          <col style="width:16%">
           <col style="width:11%">
+          <col style="width:15%">
+          <col style="width:15%">
+          <col style="width:10%">
+          <col style="width:11%">
+          <col style="width:18%">
           <col style="width:12%">
-          <col style="width:20%">
-          <col style="width:13%">
+          <col style="width:8%">
         </colgroup>
         <thead>
           <tr>
@@ -475,6 +479,7 @@
             <th data-col="chTime">Prognose Grenze ↕</th>
             <th data-col="status">Status</th>
             <th data-col="delay">Verspätung ↕</th>
+            <th>Prüfen</th>
           </tr>
         </thead>
         <tbody id="train-tbody">
@@ -482,12 +487,12 @@
                show immediately on first paint (no JS execution needed).
                renderTable() replaces this innerHTML with real rows on its
                first run and adds .data-loaded for the fade-in. -->
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
-          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
+          <tr class="skeleton-row"><td><span class="skeleton-cell w-badge"></span><span class="skeleton-cell w-num"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-full"></span></td><td><span class="skeleton-cell w-mid"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-badge2"></span></td><td><span class="skeleton-cell w-short"></span></td><td><span class="skeleton-cell w-short"></span></td></tr>
         </tbody>
       </table>
       <div class="empty-state" id="empty-state" style="display:none">
@@ -1235,6 +1240,9 @@ function renderTable() {
     const sel = t._id === state.selectedId ? 'selected' : '';
     const num = t.id.replace(/^\S+\s/,'');
     const zLabel = state.selectedId === t._id ? 'Zuglauf schliessen' : 'Zuglauf öffnen';
+    const verifyHref = verifyLinkFor(t);
+    const verifyCell = verifyHref
+      ? `<a class="verify-link" href="${verifyHref}" target="_blank" rel="noopener" title="Bei der offiziellen Quelle prüfen">Prüfen ↗</a>` : '';
     return `<tr class="${sel}" data-id="${t._id}">
       <td class="td-train">
         <span class="type-badge badge-${t.type}">${t.type}</span> <span>${num}</span>
@@ -1249,6 +1257,7 @@ function renderTable() {
         ${si.detail ? `<div class="status-detail">${si.detail}</div>` : ''}
       </td>
       <td class="td-delay ${dc}">${t.status === 'cancelled' ? '' : fmtDelay(t.delay, delayKnownDisplay)}</td>
+      <td class="td-verify">${verifyCell}</td>
     </tr>`;
   });
 
@@ -1262,7 +1271,7 @@ function renderTable() {
     // just to update a clock. Seeded with the real current time (seconds
     // included) rather than nowMin()'s minute-granular value, which the
     // ticker then keeps current between renders.
-    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="7"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · <span id="now-marker-clock">${nowMarkerClockText()}</span></span><span class="now-marker-line"></span></div></td></tr>`);
+    rowsHtml.splice(nowIdx, 0, `<tr class="now-marker"><td colspan="8"><div class="now-marker-inner"><span class="now-marker-line"></span><span class="now-marker-label">JETZT · <span id="now-marker-clock">${nowMarkerClockText()}</span></span><span class="now-marker-line"></span></div></td></tr>`);
   }
 
   tbody.innerHTML = rowsHtml.join('');
@@ -1276,6 +1285,11 @@ function renderTable() {
       ev.stopPropagation();
       toggleZuglaufPanel(parseInt(el.dataset.zuglaufId));
     });
+  });
+  // Without this, clicking the link ALSO bubbles up to the row's own click
+  // handler and opens the Zuglauf panel underneath the new tab it just opened.
+  tbody.querySelectorAll('.verify-link').forEach(el => {
+    el.addEventListener('click', (ev) => ev.stopPropagation());
   });
 }
 
@@ -2212,13 +2226,29 @@ async function resolveDynamicRouteEndpoints(t) {
     // the resolved endpoint on the Italian-axis side isn't a recognised
     // Swiss endpoint (i.e. always, for this axis, on whichever side is
     // Italian) and that side wasn't already extended.
-    if (live.type === 'EC' && (live.chStation === 'Chiasso' || live.chStation === 'Domodossola')) {
+    // isGotthardSimplonAxisEc, not a bare chStation check — chStation
+    // itself can be wrong for the same reason that function exists
+    // (confirmed live: EC 144 Milano→Genève was recorded under chStation
+    // "Genève" instead of its true crossing "Domodossola", since Genève —
+    // its actual final destination — is also one of our watched border
+    // stations and happened to catch it first).
+    let trueChStation = live.chStation;
+    if (isGotthardSimplonAxisEc(live)) {
       if (!backExtended && !isSwissEcEndpoint(trueFrom)) {
         const resolved = await resolveViaggiaTrenoOrigin(numKey(live.id), live.chStation, trainDayOffset(live));
         if (resolved) {
           trueFrom = resolved.name;
           const originDep = resolved.fermate[0]?.partenza_teorica;
           if (originDep) trueDep = hhmmZurich(new Date(originDep).toISOString());
+          // resolveViaggiaTrenoOrigin's own fermate run border-to-border —
+          // its last entry (IT→CH direction) is whichever of Chiasso/
+          // Domodossola ViaggiaTreno actually matched this train against,
+          // i.e. the genuinely correct crossing regardless of chStation.
+          const lastF = resolved.fermate[resolved.fermate.length - 1];
+          const confirmedBorder = cleanStationName(lastF?.stazione || lastF?.nomeStazione || '');
+          if (confirmedBorder && (samePlaceLoose(confirmedBorder, 'Chiasso') || samePlaceLoose(confirmedBorder, 'Domodossola'))) {
+            trueChStation = samePlaceLoose(confirmedBorder, 'Chiasso') ? 'Chiasso' : 'Domodossola';
+          }
         }
       } else if (!fwdExtended && !isSwissEcEndpoint(trueTo)) {
         // CH→IT direction: unlike the IT→CH case above, the origin here
@@ -2232,17 +2262,25 @@ async function resolveDynamicRouteEndpoints(t) {
         // already-known value (confirmed live: EC 45 kept resolving to
         // "Domodossola" instead of its true destination "Milano
         // Centrale"). Fetching the run directly and taking its own last
-        // fermata is the actually-correct destination lookup.
-        const originId = VIAGGIATRENO_BORDER_IDS[live.chStation];
-        const fermate = await fetchViaggiaTrenoRun(originId, numKey(live.id), trainDayOffset(live));
-        if (fermate?.length) {
-          const lastF = fermate[fermate.length - 1];
-          trueTo = titleCaseItalianStation(lastF.stazione || lastF.nomeStazione || trueTo);
+        // fermata is the actually-correct destination lookup. If chStation
+        // itself is wrong, VIAGGIATRENO_BORDER_IDS[chStation] comes back
+        // undefined — try both known borders instead of giving up.
+        const candidateIds = VIAGGIATRENO_BORDER_IDS[live.chStation]
+          ? [[live.chStation, VIAGGIATRENO_BORDER_IDS[live.chStation]]]
+          : Object.entries(VIAGGIATRENO_BORDER_IDS);
+        for (const [borderName, originId] of candidateIds) {
+          const fermate = await fetchViaggiaTrenoRun(originId, numKey(live.id), trainDayOffset(live));
+          if (fermate?.length) {
+            const lastF = fermate[fermate.length - 1];
+            trueTo = titleCaseItalianStation(lastF.stazione || lastF.nomeStazione || trueTo);
+            trueChStation = borderName;
+            break;
+          }
         }
       }
     }
-    if (live.from !== trueFrom || live.to !== trueTo || (trueDep && live.dep !== trueDep)) {
-      live.from = trueFrom; live.to = trueTo;
+    if (live.from !== trueFrom || live.to !== trueTo || live.chStation !== trueChStation || (trueDep && live.dep !== trueDep)) {
+      live.from = trueFrom; live.to = trueTo; live.chStation = trueChStation;
       if (trueDep) live.dep = trueDep;
       applyFilters();
     }
@@ -2979,6 +3017,85 @@ function isSwissEcEndpoint(name) {
 function italyIsDestination(train) {
   return !isSwissEcEndpoint(cleanStationName(train.to));
 }
+
+// ─── "PRÜFEN" COLUMN (link to an official source) ────────────────────────────
+// Stations recognized as Swiss for deciding "Ausland → Schweiz" vs. "Schweiz
+// → Ausland" below — deliberately scoped to endpoints this dashboard's own
+// curated/dynamic rows actually use as a from/to, not a general gazetteer.
+const SWISS_DESTINATION_CITIES = new Set([
+  'ZÜRICH HB', 'ZUERICH HB', 'BASEL SBB', 'BASEL BAD BF', 'GENÈVE', 'GENEVE',
+  'LAUSANNE', 'BERN', 'CHUR', 'BRIG', 'INTERLAKEN OST', 'INTERLAKEN WEST',
+  'LUZERN', 'ST. GALLEN', 'SCHAFFHAUSEN', 'ST. MARGRETHEN', 'BUCHS SG',
+  'CHIASSO', 'VALLORBE',
+]);
+function isSwissCity(name) {
+  return SWISS_DESTINATION_CITIES.has(cleanStationName(name || '').toUpperCase());
+}
+// Only shown for trains ARRIVING in Switzerland from abroad — for the
+// reverse direction, the delay already comes straight from the Swiss
+// source itself (opendata.ch), so a foreign official source has nothing to
+// add; a link there would just invite doubting first-hand data for no
+// reason (explicit product decision, not a data-quality judgement).
+function isArrivingFromAbroad(train) {
+  return isSwissCity(train.to) && !isSwissCity(train.from);
+}
+// Which country's official checking tool applies. Deliberately based on
+// the train's actual FOREIGN city (train.from, since verifyLinkFor only
+// ever calls this once isArrivingFromAbroad is already true) rather than
+// on chStation — two confirmed live problems with a chStation-based
+// mapping: (1) chStation itself can be flat-out wrong for the same reason
+// isGotthardSimplonAxisEc exists (EC 144 Milano→Genève was discovered
+// under chStation "Genève" instead of the true crossing "Domodossola",
+// pointing this at SNCF instead of ViaggiaTreno); (2) even when chStation
+// IS the genuine crossing, it can be the wrong COUNTRY for this purpose —
+// the München↔Zürich EC physically transits a short Austrian stretch
+// (crossing at St. Margrethen), but the train's own record is DB's, not
+// ÖBB's, since it originates in Germany. Matching the origin CITY sidesteps
+// both issues at once.
+const FOREIGN_CITY_COUNTRY = [
+  [/MÜNCHEN|MUENCHEN/, 'DE'], [/HAMBURG/, 'DE'], [/FRANKFURT/, 'DE'], [/BERLIN/, 'DE'],
+  [/STUTTGART/, 'DE'], [/KARLSRUHE/, 'DE'], [/MANNHEIM/, 'DE'], [/KÖLN|KOELN/, 'DE'],
+  [/DORTMUND/, 'DE'], [/DÜSSELDORF|DUESSELDORF/, 'DE'], [/DUISBURG/, 'DE'], [/\bESSEN\b/, 'DE'],
+  [/BOCHUM/, 'DE'], [/MÜNSTER|MUENSTER/, 'DE'], [/OSNABRÜCK|OSNABRUECK/, 'DE'], [/BREMEN/, 'DE'],
+  [/FREIBURG/, 'DE'], [/OFFENBURG/, 'DE'], [/BADEN-BADEN/, 'DE'], [/LINDAU/, 'DE'],
+  [/WIEN/, 'AT'], [/SALZBURG/, 'AT'], [/INNSBRUCK/, 'AT'], [/FELDKIRCH/, 'AT'], [/BREGENZ/, 'AT'],
+  [/MILANO/, 'IT'], [/VENEZIA/, 'IT'], [/FIRENZE/, 'IT'], [/COMO/, 'IT'], [/\bROMA\b/, 'IT'], [/TORINO/, 'IT'],
+  [/PARIS/, 'FR'], [/MULHOUSE/, 'FR'], [/STRASBOURG/, 'FR'], [/\bLYON\b/, 'FR'],
+];
+function foreignCountryOf(name) {
+  const upper = cleanStationName(name || '').toUpperCase();
+  for (const [re, cc] of FOREIGN_CITY_COUNTRY) if (re.test(upper)) return cc;
+  return null;
+}
+function officialSourceCountryFor(train) {
+  if (train.type === 'TGV' || train.type === 'TER') return 'FR'; // redundant with the city match above in the common case, kept as a safety net
+  return foreignCountryOf(train.from) || foreignCountryOf(train.to);
+}
+// Only SNCF supports linking straight to one specific train — confirmed
+// live: sncf-voyageurs.com's detail-train page genuinely routes on
+// dateCirculation/numeroCirculation. The other three don't: DB's public
+// site has no per-train lookup at all (RIS-Info is an internal, login-
+// gated ops tool, not a customer-facing one); ViaggiaTreno's current site
+// has no URL-based routing to a specific train (checked directly in its
+// own JS — the routing logic simply isn't there); ÖBB's HAFAS search
+// returns "no results" for every URL-parameter combination tried, real
+// trains included, so it needs session state a plain link can't provide.
+// Those three fall back to the right homepage instead of a dead-end link.
+function verifyLinkFor(train) {
+  if (!isArrivingFromAbroad(train)) return null;
+  const country = officialSourceCountryFor(train);
+  if (country === 'FR') {
+    const d = new Date();
+    d.setDate(d.getDate() + trainDayOffset(train));
+    const dateStr = d.toLocaleDateString('en-CA', {timeZone: 'Europe/Zurich'}); // YYYY-MM-DD
+    return `https://www.sncf-voyageurs.com/fr/voyagez-avec-nous/horaires-et-itineraires/recherche-de-train/detail-train/?dateCirculation=${dateStr}&numeroCirculation=${numKey(train.id)}`;
+  }
+  if (country === 'IT') return 'http://www.viaggiatreno.it/infomobilita/index.jsp';
+  if (country === 'AT') return 'https://fahrplan.oebb.at/bin/trainsearch.exe/dn?protocol=https:&';
+  if (country === 'DE') return 'https://www.bahn.de/';
+  return null;
+}
+
 // The EC-Italy branch normally gates on train.chStation being literally
 // "Chiasso"/"Domodossola" — but that field can itself be wrong for a train
 // whose Transitous /trip response is severely truncated (confirmed live:
