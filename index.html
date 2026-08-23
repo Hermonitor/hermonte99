@@ -149,6 +149,7 @@
   .zuglauf-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 16px; }
   .zuglauf-table th { font-family: var(--font-display); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   .zuglauf-table td { font-size: 13px; padding: 5px 6px; white-space: nowrap; border-bottom: 1px solid oklch(20% 0.008 240); overflow: visible; text-overflow: clip; }
+  .extra-stop-badge { display: inline-block; font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.03em; padding: 1px 6px; margin-left: 5px; border-radius: 2px; background: oklch(22% 0.06 75); color: var(--amber); border: 1px solid oklch(32% 0.10 75); white-space: nowrap; vertical-align: middle; }
   /* Station-name column: unlike the row table, names here are never the
      bottleneck-critical column (An/Ab are) — let long names
      ("Como S. Giovanni") wrap onto a second line instead of ellipsing. */
@@ -1598,10 +1599,11 @@ async function fetchZuglaufStops(train) {
     }));
 
     let itHits = 0;
-    // Only EC trains actually use ViaggiaTreno — gating on chStation alone
-    // would also fire for any other category discovered live at the same
-    // border station, needlessly risking a category mismatch downstream.
-    if (train.type === 'EC' && (train.chStation === 'Chiasso' || train.chStation === 'Domodossola')) {
+    // isGotthardSimplonAxisEc (not a bare chStation check) — chStation
+    // alone misses trains like EC 62 whose truncated Transitous route
+    // caused it to be discovered at a domestic Swiss stop instead of the
+    // true border (see that function's comment).
+    if (isGotthardSimplonAxisEc(train)) {
       // Direction determines which end of the route is on Italian soil,
       // and — critically — which ViaggiaTreno origin ID to query with (see
       // VIAGGIATRENO_BORDER_IDS/VIAGGIATRENO_ORIGIN_IDS comment above):
@@ -1662,7 +1664,34 @@ async function fetchZuglaufStops(train) {
             source: 'viaggiatreno',
           };
         });
-        vtBorderStop = builtStops.find(s => sameStation(s.name, train.chStation)) || null;
+        // A partial-origin cancellation (see parseViaggiaTrenoOriginChange)
+        // isn't visible in any per-stop field — the nominal origin's own
+        // `soppressa` stays false/absent, so without this it would render
+        // as an ordinary, unaffected stop even though the train never
+        // actually called there today. Marks every stop up to (excluding)
+        // the real, exceptional departure point as cancelled, and flags
+        // that departure point itself so the Zuglauf can call out that it's
+        // not a normal scheduled stop.
+        const originChange = parseViaggiaTrenoOriginChange(fermate.subTitle);
+        if (originChange) {
+          const actualIdx = builtStops.findIndex(s => samePlaceLoose(s.name, originChange.actualOrigin));
+          if (actualIdx > 0) {
+            for (let i = 0; i < actualIdx; i++) builtStops[i] = {...builtStops[i], cancelled: true};
+            builtStops[actualIdx] = {...builtStops[actualIdx], extraordinaryOrigin: true};
+          }
+        }
+        // The GEOGRAPHIC border this Italian tail actually ends/starts at —
+        // NOT necessarily train.chStation, which can itself be wrong (see
+        // isGotthardSimplonAxisEc). fermate's own last (IT→CH) or first
+        // (CH→IT) entry is whichever of Chiasso/Domodossola ViaggiaTreno
+        // itself matched this run against, i.e. the genuinely correct one
+        // regardless of what chStation says (confirmed live: EC 62 —
+        // splicing against chStation="Basel SBB" here, a real stop on the
+        // route but nowhere near where the Italian tail actually joins it,
+        // wiped out the entire correctly-populated Domodossola…Olten
+        // stretch instead of just replacing the missing Italian portion).
+        const effectiveBorder = cleanStationName((destIsItaly ? builtStops[0] : builtStops[builtStops.length - 1])?.name) || train.chStation;
+        vtBorderStop = builtStops.find(s => sameStation(s.name, effectiveBorder)) || null;
         // The border station itself (Chiasso/Domodossola) stays on the CH
         // source, per the agreed rule ("bis/ab der Grenze" — the border is
         // the last/first stop the Swiss source is authoritative for, not
@@ -1677,20 +1706,20 @@ async function fetchZuglaufStops(train) {
         const italianOnly = destIsItaly ? builtStops.slice(1) : builtStops.slice(0, -1);
         itHits = italianOnly.length;
         if (destIsItaly) {
-          const borderIdx = staticStops.findIndex(s => sameStation(s.name, train.chStation));
+          const borderIdx = staticStops.findIndex(s => sameStation(s.name, effectiveBorder));
           const tailStart = borderIdx >= 0 ? borderIdx + 1 : stops.length;
           stops.splice(tailStart, stops.length - tailStart, ...italianOnly);
         } else {
           // If the border genuinely isn't in staticStops at all (not a
           // case-sensitivity miss — confirmed live: EC 62's Transitous
-          // /trip was just [Milano Centrale, Basel SBB], skipping
-          // Domodossola AND everything else entirely), keep only the
-          // route's own first element (the origin, already verified via
-          // train.from) and let the passList repair below rebuild
-          // everything after it — NOT staticStops.length - 1, which
-          // assumed the last element was one-past-the-border and left
-          // an unrelated stop half-replaced.
-          let borderIdx = staticStops.findIndex(s => sameStation(s.name, train.chStation));
+          // /trip was just [Milano Centrale, Basel SBB] on an earlier
+          // occurrence, skipping Domodossola AND everything else entirely),
+          // keep only the route's own first element (the origin, already
+          // verified via train.from) and let the passList repair below
+          // rebuild everything after it — NOT staticStops.length - 1,
+          // which assumed the last element was one-past-the-border and
+          // left an unrelated stop half-replaced.
+          let borderIdx = staticStops.findIndex(s => sameStation(s.name, effectiveBorder));
           if (borderIdx < 0) borderIdx = 1;
           stops.splice(0, borderIdx, ...italianOnly);
         }
@@ -2221,9 +2250,18 @@ async function resolveViaggiaTrenoOrigin(numeroTreno, chStationName, dayOffset =
     // whichever one matches cuts that to a single round-trip's worth of
     // wait regardless of how many candidates there are.
     const results = await Promise.all(candidates.map(c => fetchViaggiaTrenoRun(c.id, numeroTreno, dayOffset)));
+    // Accepts the given chStationName, but also always accepts Chiasso/
+    // Domodossola outright — this function only ever gets called for a
+    // Gotthard/Simplon-axis EC in the first place, so a candidate that
+    // genuinely reaches either of those two IS the right one even when
+    // chStationName itself is wrong (confirmed live: EC 62 was recorded
+    // under "Basel SBB" — a real but non-border stop on its route — after
+    // Transitous's own severely truncated /trip data caused it to be
+    // discovered there instead of at Domodossola).
+    const acceptableBorders = new Set([chStationName.toUpperCase(), 'CHIASSO', 'DOMODOSSOLA']);
     for (let i = 0; i < candidates.length; i++) {
       const fermate = results[i];
-      if (fermate?.some(f => cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase() === chStationName.toUpperCase())) {
+      if (fermate?.some(f => acceptableBorders.has(cleanStationName(f.stazione || f.nomeStazione || '').toUpperCase()))) {
         return {name: titleCaseItalianStation(candidates[i].name), id: candidates[i].id, fermate};
       }
     }
@@ -2293,7 +2331,13 @@ function buildZuglaufTable(stops) {
     const cancelledArrival = s.cancelled && !s.arrival;
     const anCell = buildZuglaufCell(s.scheduledArrival, s.arrival, cancelledArrival, !!s.forecast);
     const abCell = buildZuglaufCell(s.scheduledDeparture, s.departure, s.cancelled, !!s.forecast);
-    return `<tr><td>${name}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
+    // Flags the one specific case where a train restarts from a station it
+    // doesn't normally serve at all, after a partial-origin cancellation
+    // (see parseViaggiaTrenoOriginChange) — without this, an exceptional
+    // substitute departure point reads as just another ordinary stop.
+    const extraBadge = s.extraordinaryOrigin
+      ? ` <span class="extra-stop-badge" title="Zug fährt hier ausserordentlich ab — normalerweise kein Halt">Ausserordentlicher Halt</span>` : '';
+    return `<tr><td>${name}${extraBadge}</td><td class="td-time">${anCell}</td><td class="td-time">${abCell}</td></tr>`;
   });
   return `<table class="zuglauf-table">
     <thead><tr><th>Halt</th><th>An</th><th>Ab</th></tr></thead>
@@ -2807,8 +2851,31 @@ async function fetchViaggiaTrenoRun(originStationId, numeroTreno, dayOffset = 0)
     // for, not a same-numbered service from a different operator/category.
     if (!data?.fermate?.length || String(data.numeroTreno) !== String(numeroTreno)) return null;
     if (data.categoria && data.categoria !== 'EC' && !/\bEC\b/.test(data.compNumeroTreno || '')) return null;
+    // ViaggiaTreno's `subTitle` carries a free-text notice for situations
+    // its structured fermate data doesn't otherwise flag on its own —
+    // confirmed live: EC 62 cancelled Milano Centrale→Legnano and restarted
+    // exceptionally FROM Legnano (a station it doesn't normally serve at
+    // all), with the origin fermata's own `soppressa` left false/absent —
+    // the cancellation is only stated in this sentence. Attached to the
+    // array itself (fermate.subTitle) rather than changing this function's
+    // return shape, so every existing caller keeps working unchanged; only
+    // fetchZuglaufStops actually reads it (see parseViaggiaTrenoOriginChange).
+    data.fermate.subTitle = typeof data.subTitle === 'string' ? data.subTitle : null;
     return data.fermate;
   } catch (e) { return null; }
+}
+// Parses the one specific subTitle shape confirmed live (see above): a
+// partial-origin cancellation where the train restarts from an
+// exceptional, normally-unserved stop partway along its original route.
+// Other subTitle text (delay explanations, full cancellations, etc.) is
+// deliberately left unmatched and ignored — this only ever adds an
+// annotation, never removes information the rest of the pipeline already
+// derives correctly on its own.
+function parseViaggiaTrenoOriginChange(subTitle) {
+  if (!subTitle) return null;
+  const m = subTitle.match(/[Tt]reno cancellato da (.+?) a (.+?)\.\s*[Pp]arte da (.+?)\.?\s*$/);
+  if (!m) return null;
+  return {cancelledFrom: m[1].trim(), cancelledTo: m[2].trim(), actualOrigin: m[3].trim()};
 }
 // A fermata's own `ritardo` (delay, minutes) is only trustworthy once
 // ViaggiaTreno has actually tracked the train there (arrivoReale or
@@ -2859,6 +2926,20 @@ function isSwissEcEndpoint(name) {
 }
 function italyIsDestination(train) {
   return !isSwissEcEndpoint(cleanStationName(train.to));
+}
+// The EC-Italy branch normally gates on train.chStation being literally
+// "Chiasso"/"Domodossola" — but that field can itself be wrong for a train
+// whose Transitous /trip response is severely truncated (confirmed live:
+// EC 62's own route data was just [Milano Centrale, Basel SBB], so its
+// border-station poll match landed at Basel SBB — a real stop on its route,
+// just not the actual international crossing — instead of Domodossola).
+// Falls back to recognising the axis from train.from/to directly whenever
+// chStation didn't already give a clean answer, using the same Italian-
+// origin list ViaggiaTreno lookups already rely on elsewhere.
+function isGotthardSimplonAxisEc(train) {
+  if (train.type !== 'EC') return false;
+  if (train.chStation === 'Chiasso' || train.chStation === 'Domodossola') return true;
+  return !!(VIAGGIATRENO_ORIGIN_IDS[cleanStationName(train.from)] || VIAGGIATRENO_ORIGIN_IDS[cleanStationName(train.to)]);
 }
 function viaggiatrenoOriginIdFor(train) {
   return italyIsDestination(train)
